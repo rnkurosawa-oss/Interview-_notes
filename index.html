@@ -451,6 +451,11 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
       <p class="small">APIキーはこのブラウザの中にだけ保存され、Anthropic のAPI以外には送信されません。共用パソコンでは使用後に消去してください。</p>
     </section>
     <section>
+      <h3>録音</h3>
+      <label class="chk"><input type="checkbox" id="setLive">録音と同時に文字起こしする</label>
+      <p class="small">iPad などで録音中に動作が重くなる・録音が途中で止まる場合はオフにしてください。オフにすると録音だけを行います。</p>
+    </section>
+    <section>
       <h3>バックアップ</h3>
       <p class="small">データ（メモ・録音・写真）はこのブラウザの中に保存されています。ブラウザのデータ消去で失われるため、定期的に書き出してください。</p>
       <div class="pane-actions">
@@ -860,16 +865,21 @@ paperEl.addEventListener('pointerdown', e => {
   if (e.pointerType === 'pen' && !P.penSeen) { P.penSeen = true; if (!P.penOnly) { setPenOnly(true); toast('ペンを検出しました。指で触るとスクロールになります（手のひらボタンで切替）'); } }
   if (e.pointerType === 'touch' && P.penOnly && P.tool !== 'select') { P.pan = { id: e.pointerId, y: e.clientY }; paperEl.setPointerCapture(e.pointerId); return; }
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  if (P.drawing || P.erasing || P.drag) return;
+  const stale = P.drawing || P.erasing || P.drag;
+  if (stale) {
+    // 「離した」通知が届かず残った線は確定させ、新しい書き込みを受け付ける
+    if (stale.type === e.pointerType || e.pointerType !== 'touch') endPointer({ pointerId: stale.id });
+    else return;
+  }
   e.preventDefault(); paperEl.setPointerCapture(e.pointerId);
   P.rect = paperEl.getBoundingClientRect();
   const pt = toPt(e);
   const tool = (e.pointerType === 'pen' && (e.button === 5 || (e.buttons & 32))) ? 'eraser' : P.tool;
   if (tool === 'select') { startSelect(e, pt); return; }
-  if (tool === 'eraser') { P.erasing = { id: e.pointerId, before: S.cur.strokes, changed: false }; eraseAt(pt); return; }
+  if (tool === 'eraser') { P.erasing = { id: e.pointerId, type: e.pointerType, before: S.cur.strokes, changed: false }; eraseAt(pt); return; }
   const w = WIDTHS[P.wi][1];
   const s = { t: tool, c: tool === 'marker' ? P.hl : P.ink, w: tool === 'marker' ? w * 5 : w, p: [pt] };
-  P.drawing = { id: e.pointerId, s };
+  P.drawing = { id: e.pointerId, type: e.pointerType, s };
   live(s, 0, ctx => dot(ctx, s));
 });
 paperEl.addEventListener('pointermove', e => {
@@ -909,6 +919,7 @@ function endPointer(e) {
 }
 paperEl.addEventListener('pointerup', endPointer);
 paperEl.addEventListener('pointercancel', endPointer);
+paperEl.addEventListener('lostpointercapture', endPointer);
 
 /* 写真の選択・移動・拡大縮小 */
 function startSelect(e, pt) {
@@ -920,7 +931,7 @@ function startSelect(e, pt) {
     if (!hit) return;
     mode = 'move';
   }
-  P.drag = { id: e.pointerId, mode, start: pt, orig: { x: P.sel.x, y: P.sel.y, w: P.sel.w, h: P.sel.h }, moved: false };
+  P.drag = { id: e.pointerId, type: e.pointerType, mode, start: pt, orig: { x: P.sel.x, y: P.sel.y, w: P.sel.w, h: P.sel.h }, moved: false };
 }
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function dragMove(pt) {
@@ -1057,47 +1068,75 @@ document.addEventListener('keydown', e => {
 
 /* ---------- recording + live transcription ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const R = { on: false, memo: null, id: null, rec: null, stream: null, chunks: [], t0: 0, startedAt: 0, sr: null, srBlocked: false, srDelay: 200, segStart: null, interim: '', timer: null, ac: null, raf: 0, wake: null };
+const R = { on: false, busy: false, sess: null, memo: null, id: null, stream: null, t0: 0, startedAt: 0, sr: null, srOff: false, srFails: 0, srDelay: 250, segStart: null, interim: '', timer: null, ac: null, raf: 0, wake: null };
 const elapsed = () => (performance.now() - R.t0) / 1000;
+const srEnabled = () => !!SR && lsGet('liveTranscribe') !== '0';
 
-$('#btnRec').addEventListener('click', () => R.on ? stopRec() : startRec());
+$('#btnRec').addEventListener('click', () => { if (R.busy) return; R.on ? stopRec() : startRec(); });
 async function startRec() {
-  if (!S.cur) return;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { toast('このブラウザでは録音できません。Chrome または Edge で開いてください'); return; }
+  if (!S.cur || R.on) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { toast('このブラウザでは録音できません。Safari / Chrome / Edge の最新版で開いてください'); return; }
   let stream;
+  R.busy = true;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-  catch (err) { toast('マイクを使えませんでした。ブラウザのアドレスバー横の設定でマイクを「許可」にしてください'); return; }
+  catch (err) { toast('マイクを使えませんでした。ブラウザの設定でこのページのマイクを「許可」にしてください'); return; }
+  finally { R.busy = false; }
   const mt = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
-  const rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined);
-  const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  let rec;
+  try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); }
+  catch { stream.getTracks().forEach(t => t.stop()); toast('録音を開始できませんでした'); return; }
+  const sess = { memo: S.cur, id: uid(), rec, stream, chunks: [], t0: performance.now(), startedAt: Date.now(), saved: false, dur: null, note: '' };
+  rec.ondataavailable = e => { if (e.data && e.data.size) sess.chunks.push(e.data); };
+  rec.onstop = () => finalizeRec(sess);
+  rec.onerror = () => { if (R.on && R.sess === sess) stopRec('録音中にエラーが起きたため、ここまでの音声を保存しました。'); };
+  stream.getAudioTracks().forEach(t => t.addEventListener('ended', () => { if (R.on && R.sess === sess) stopRec('マイクが使えなくなったため、ここまでの音声を保存しました。'); }));
   rec.start(1000);
-  Object.assign(R, { on: true, memo: S.cur, id: uid(), rec, stream, chunks, t0: performance.now(), startedAt: Date.now(), srBlocked: false, srDelay: 200, segStart: null, interim: '' });
-  startSR(); startMeter();
+  Object.assign(R, { on: true, sess, memo: sess.memo, id: sess.id, stream, t0: sess.t0, startedAt: sess.startedAt, srOff: false, srFails: 0, srDelay: 250, segStart: null, interim: '' });
+  // 画面の切り替えを先に済ませ、停止ボタンがすぐ使えるようにする
+  updateRecUI(); renderTranscript();
   R.timer = setInterval(() => { $('#recTime').textContent = fmtTime(elapsed()); }, 500);
-  try { R.wake = await navigator.wakeLock?.request('screen'); } catch {}
-  showTab('tr'); updateRecUI(); renderTranscript();
+  startMeter();
+  if (srEnabled()) startSR(); else $('#liveText').textContent = SR ? '録音のみ（文字起こしは設定でオフ）' : '録音中（このブラウザは文字起こし非対応）';
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { if (R.on) R.wake = w; else w.release(); }).catch(() => {});
 }
 function startSR() {
-  if (!SR) return;
+  if (!SR || R.srOff || !R.on) return;
   const sr = new SR(); sr.lang = 'ja-JP'; sr.continuous = true; sr.interimResults = true;
+  let began = performance.now(), got = false;
+  sr.onstart = () => { began = performance.now(); };
   sr.onresult = e => {
+    got = true; R.srFails = 0; R.srDelay = 250;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i], txt = r[0].transcript;
       if (R.segStart == null) R.segStart = Math.max(0, elapsed() - 1.5);
-      if (r.isFinal) { pushSeg(txt); R.srDelay = 200; } else interim += txt;
+      if (r.isFinal) pushSeg(txt); else interim += txt;
     }
     R.interim = interim; showInterim();
   };
   sr.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { R.srBlocked = true; toast('文字起こしが許可されていません。録音のみ続けます'); }
-    else if (e.error === 'network') { R.srDelay = 4000; toast('文字起こしにはインターネット接続が必要です。再接続を試みます'); }
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') disableSR('文字起こしが許可されていないため、録音のみ続けます。');
+    else if (e.error === 'audio-capture') disableSR('この端末では録音と同時に文字起こしできなかったため、録音のみ続けます。');
+    else if (e.error === 'network') R.srDelay = 4000;
   };
   sr.onend = () => {
     if (R.interim) { pushSeg(R.interim); R.interim = ''; showInterim(); }
-    if (R.on && R.sr === sr && !R.srBlocked) setTimeout(() => { if (R.on && R.sr === sr) { try { sr.start(); } catch {} } }, R.srDelay);
+    if (!R.on || R.sr !== sr || R.srOff) return;
+    // すぐに終了を繰り返す端末では、再起動の連打で画面が重くならないよう間隔を空け、最後は止める
+    if (!got && performance.now() - began < 3000) R.srFails++;
+    if (R.srFails >= 5) { disableSR('文字起こしが何度も止まったため停止しました。録音は続いています。'); return; }
+    const wait = R.srFails ? Math.min(8000, 500 * 2 ** R.srFails) : R.srDelay;
+    setTimeout(() => { if (R.on && R.sr === sr && !R.srOff) startSR(); }, wait);
   };
-  R.sr = sr; try { sr.start(); } catch {}
+  R.sr = sr;
+  try { sr.start(); } catch { R.srFails++; }
+}
+function disableSR(msg) {
+  if (R.srOff) return;
+  R.srOff = true; const sr = R.sr; R.sr = null;
+  try { sr && sr.abort(); } catch {}
+  $('#liveText').textContent = '録音のみ（文字起こし停止中）';
+  toast(msg, 6000);
 }
 function pushSeg(txt) {
   const t = (txt || '').trim(); const at = R.segStart ?? Math.max(0, elapsed() - 2); R.segStart = null;
@@ -1112,32 +1151,42 @@ function showInterim() {
   const last = R.memo && R.memo.transcript.filter(s => s.rec === R.id).slice(-1)[0];
   $('#liveText').textContent = txt || (last ? last.text : '話し始めると、ここに文字が表示されます');
 }
-function stopRec() {
+function stopRec(note) {
   if (!R.on) return;
-  const memo = R.memo, id = R.id, dur = elapsed(), startedAt = R.startedAt, rec = R.rec, stream = R.stream, chunks = R.chunks;
-  R.on = false;
+  const sess = R.sess;
+  sess.dur = elapsed(); if (note) sess.note = note;
+  // まず画面を「停止済み」に戻す（後続の処理で失敗してもボタンが固まらないように）
+  R.on = false; clearInterval(R.timer); updateRecUI(); $('#interim').textContent = '';
+  try { if (R.interim) pushSeg(R.interim); } catch {}
+  R.interim = '';
   const sr = R.sr; R.sr = null;
-  if (R.interim) { const keep = R.memo; R.memo = memo; pushSeg(R.interim); R.memo = keep; R.interim = ''; }
   try { sr && sr.stop(); } catch {}
-  clearInterval(R.timer); stopMeter();
+  try { stopMeter(); } catch {}
   try { R.wake && R.wake.release(); } catch {} R.wake = null;
-  rec.onstop = async () => {
-    stream.getTracks().forEach(t => t.stop());
-    const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-    const bid = uid();
-    try { await db.put('blobs', { id: bid, blob }); }
-    catch (e) { toast('録音の保存に失敗しました：' + (e && e.message || e)); return; }
-    memo.recordings.push({ id, blob: bid, mime: blob.type, dur: Math.round(dur), startedAt });
-    markDirty(memo); renderTree();
-    if (S.cur === memo) renderTranscript();
-    toast(`録音を保存しました（${fmtTime(dur)}）`);
-  };
-  rec.stop();
-  $('#interim').textContent = ''; updateRecUI();
+  try { if (sess.rec.state !== 'inactive') sess.rec.stop(); else finalizeRec(sess); }
+  catch { finalizeRec(sess); }
+}
+async function finalizeRec(sess) {
+  if (sess.saved) return;
+  // 端末側で録音が先に止まった場合：停止処理を通してから保存する
+  if (R.on && R.sess === sess) { stopRec('録音が中断されたため、ここまでの音声を保存しました。'); return; }
+  sess.saved = true;
+  try { sess.stream.getTracks().forEach(t => t.stop()); } catch {}
+  const dur = sess.dur ?? (performance.now() - sess.t0) / 1000;
+  if (!sess.chunks.length) { toast('録音データがありませんでした。マイクの許可を確認してください', 6000); return; }
+  const blob = new Blob(sess.chunks, { type: sess.rec.mimeType || sess.chunks[0].type || 'audio/mp4' });
+  const bid = uid();
+  try { await db.put('blobs', { id: bid, blob }); }
+  catch (e) { toast('録音の保存に失敗しました：' + (e && e.message || e), 6000); return; }
+  const m = sess.memo;
+  m.recordings.push({ id: sess.id, blob: bid, mime: blob.type, dur: Math.round(dur), startedAt: sess.startedAt });
+  markDirty(m); renderTree();
+  if (S.cur === m) renderTranscript();
+  toast(`${sess.note}録音を保存しました（${fmtTime(dur)}）`, sess.note ? 6000 : 3400);
 }
 function startMeter() {
   try {
-    const AC = window.AudioContext || window.webkitAudioContext; R.ac = new AC();
+    const AC = window.AudioContext || window.webkitAudioContext; R.ac = new AC(); R.ac.resume && R.ac.resume().catch(() => {});
     const an = R.ac.createAnalyser(); an.fftSize = 512; R.ac.createMediaStreamSource(R.stream).connect(an);
     const buf = new Uint8Array(an.fftSize), bar = $('#meterBar');
     const loop = () => { an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) { const d = (v - 128) / 128; s += d * d; } bar.style.transform = `scaleX(${Math.min(1, Math.sqrt(s / buf.length) * 5)})`; R.raf = requestAnimationFrame(loop); };
@@ -1169,6 +1218,7 @@ function renderPanel() { renderTranscript(); renderPhotos(); renderAI(); }
 function srNote() {
   const n = $('#srNote');
   if (!SR) { n.hidden = false; n.textContent = 'このブラウザは自動文字起こしに対応していません。録音のみ行います。Google Chrome または Microsoft Edge で開くと文字起こしできます。'; }
+  else if (!srEnabled()) { n.hidden = false; n.textContent = '録音と同時の文字起こしはオフになっています（「設定」で切り替えできます）。'; }
   else { n.hidden = true; }
 }
 function groupsFor(m) {
@@ -1453,13 +1503,16 @@ async function streamClaude(key, content, signal, onText) {
 const dlgSet = $('#dlgSettings');
 $('#btnSettings').addEventListener('click', async () => {
   $('#setKey').value = lsGet('apiKey') || ''; $('#setModel').value = MODEL();
+  $('#setLive').checked = lsGet('liveTranscribe') !== '0'; $('#setLive').disabled = !SR;
   $('#storageInfo').textContent = '';
   try { const est = await navigator.storage.estimate(); $('#storageInfo').textContent = `使用量 ${(est.usage / 1048576).toFixed(1)} MB / 利用可能 ${(est.quota / 1073741824).toFixed(1)} GB`; } catch {}
   dlgSet.returnValue = ''; dlgSet.showModal();
 });
 dlgSet.addEventListener('close', () => {
   if (dlgSet.returnValue !== 'ok') return;
-  lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value); renderAI(); toast('設定を保存しました');
+  lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value);
+  lsSet('liveTranscribe', $('#setLive').checked ? '1' : '0');
+  renderAI(); if (S.cur) srNote(); toast('設定を保存しました');
 });
 $('#btnExport').addEventListener('click', async e => {
   const b = e.currentTarget; b.disabled = true; b.textContent = '書き出し中…';
