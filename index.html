@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>取材ノート</title>
+<title>INTERVIEW NOTE</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -125,7 +125,7 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .qempty{font-size:13px;color:var(--muted);margin:0}
 
 /* toolbar */
-.toolbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding-block:8px;margin-block:-8px;display:grid;gap:6px}
+.toolbar{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:8px;margin-block:-8px;display:grid;gap:6px}
 .tb-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;box-shadow:var(--shadow)}
 .tb-group{display:flex;align-items:center;gap:2px}
 .tb-sep{width:1px;height:24px;background:var(--line);margin:0 4px}
@@ -150,8 +150,10 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 
 /* paper */
 .paper-shell{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;box-shadow:var(--shadow)}
-.paper{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:4px;overflow:hidden;cursor:crosshair;background:#fdfdfb}
+.paper{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border-radius:4px;overflow:hidden;cursor:crosshair;background:#fdfdfb}
 .paper canvas{display:block}
+.paper.pen-only{touch-action:pan-y}
+.main{-webkit-overflow-scrolling:touch}
 .page-btns{position:absolute;inset:0;pointer-events:none;z-index:1}
 .page-del{position:absolute;right:10px;pointer-events:auto;min-height:28px;font-size:12px;color:#8a3a33;background:rgb(255 255 255/.85);border-color:#e3c4c0;opacity:.75}
 .page-del:hover{opacity:1;background:#fff}
@@ -268,7 +270,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
 <div class="app" id="app">
   <div class="scrim" id="scrim"></div>
   <aside class="sidebar" id="sidebar" aria-label="企業フォルダ">
-    <div class="brand"><h1>取材ノート</h1><span>INTERVIEW NOTES</span></div>
+    <div class="brand"><h1>INTERVIEW NOTE</h1></div>
     <div class="side-tools">
       <input type="search" id="search" placeholder="企業名・メモを検索" aria-label="検索">
       <button class="btn primary block" id="btnNewFolder">＋ 企業フォルダを追加</button>
@@ -280,7 +282,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
   <main class="main" id="main">
     <div class="welcome" id="welcome" hidden>
       <button class="icon-btn only-narrow" data-nav aria-label="メニュー">☰</button>
-      <h2>取材ノートへようこそ</h2>
+      <h2>INTERVIEW NOTE へようこそ</h2>
       <ol>
         <li>左の「企業フォルダを追加」で取材先の企業を登録します。</li>
         <li>フォルダの「＋」から取材メモを作り、上部に質問を入力しておきます。</li>
@@ -567,7 +569,7 @@ const S = { folders: [], memos: [], cur: null, open: {}, query: '' };
 const folderOf = m => S.folders.find(f => f.id === m.folderId);
 
 function newMemo(folderId, extra = {}) {
-  return Object.assign({ id: uid(), folderId, title: '新しい取材メモ', date: today(), person: '', place: '', questions: [], strokes: [], pages: 2, recordings: [], transcript: [], photos: [], columns: [], createdAt: Date.now(), updatedAt: Date.now() }, extra);
+  return Object.assign({ id: uid(), folderId, title: '新しい取材メモ', date: today(), person: '', place: '', questions: [], strokes: [], pages: 1, recordings: [], transcript: [], photos: [], columns: [], createdAt: Date.now(), updatedAt: Date.now() }, extra);
 }
 function normalize(m) { return Object.assign(newMemo(m.folderId), m); }
 
@@ -579,6 +581,8 @@ function markDirty(m) {
   saveTimers.set(m.id, setTimeout(() => persist(m), 500));
 }
 async function persist(m) {
+  // 書いている最中は保存を後回しにして、ペンの動きを止めない
+  if (P.drawing || P.drag) { saveTimers.set(m.id, setTimeout(() => persist(m), 400)); return; }
   saveTimers.delete(m.id);
   try { await db.put('memos', m); if (m === S.cur) $('#saveState').textContent = '保存済み'; }
   catch (e) { toast('保存に失敗しました：' + (e && e.message || e)); }
@@ -776,14 +780,36 @@ function drawBg(ctx, i, total, plain) {
   }
   ctx.restore();
 }
-const pw = (s, pr) => s.t === 'marker' ? s.w : s.w * (0.35 + pr * 1.3);
+/* 筆圧→太さ。軽い筆圧でも線が細くなりすぎないよう平方根カーブ（マウス・指は 0.5 = 基準の太さ） */
+const pw = (s, pr) => s.t === 'marker' ? s.w : s.w * (0.4 + 0.85 * Math.sqrt(Math.max(0, pr)));
 const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
 function styleFor(ctx, s) { ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c; ctx.fillStyle = s.c; ctx.globalCompositeOperation = s.t === 'marker' ? 'darken' : 'source-over'; }
+/* 2次ベジェを、太さを少しずつ変えながら細かく分けて描く（太さの継ぎ目を出さない） */
+function quadVar(ctx, a, c, e, wa, we) {
+  const len = Math.hypot(c[0] - a[0], c[1] - a[1]) + Math.hypot(e[0] - c[0], e[1] - c[1]);
+  const n = Math.min(40, Math.ceil(len / 1.5));
+  if (n <= 1 || Math.abs(wa - we) < 0.04) {
+    ctx.lineWidth = (wa + we) / 2; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.quadraticCurveTo(c[0], c[1], e[0], e[1]); ctx.stroke(); return;
+  }
+  let px = a[0], py = a[1];
+  for (let k = 1; k <= n; k++) {
+    const t = k / n, u = 1 - t;
+    const x = u * u * a[0] + 2 * u * t * c[0] + t * t * e[0], y = u * u * a[1] + 2 * u * t * c[1] + t * t * e[1];
+    ctx.lineWidth = wa + (we - wa) * (t - 0.5 / n);
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();
+    px = x; py = y;
+  }
+}
 function seg(ctx, s, i) {
   const p = s.p, a = i === 1 ? p[0] : mid(p[i - 2], p[i - 1]), c = p[i - 1], e = mid(p[i - 1], p[i]);
-  ctx.lineWidth = pw(s, (c[2] + p[i][2]) / 2); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.quadraticCurveTo(c[0], c[1], e[0], e[1]); ctx.stroke();
+  if (s.t === 'marker') { ctx.lineWidth = s.w; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.quadraticCurveTo(c[0], c[1], e[0], e[1]); ctx.stroke(); return; }
+  quadVar(ctx, a, c, e, pw(s, i === 1 ? p[0][2] : (p[i - 2][2] + p[i - 1][2]) / 2), pw(s, (p[i - 1][2] + p[i][2]) / 2));
 }
-function tail(ctx, s) { const p = s.p, n = p.length, a = mid(p[n - 2], p[n - 1]); ctx.lineWidth = pw(s, p[n - 1][2]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(p[n - 1][0], p[n - 1][1]); ctx.stroke(); }
+function tail(ctx, s) {
+  const p = s.p, n = p.length, a = mid(p[n - 2], p[n - 1]), e = p[n - 1];
+  if (s.t === 'marker') { ctx.lineWidth = s.w; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); return; }
+  quadVar(ctx, a, mid(a, e), e, pw(s, (p[n - 2][2] + p[n - 1][2]) / 2), pw(s, e[2]));
+}
 function dot(ctx, s) { const q = s.p[0]; ctx.beginPath(); ctx.arc(q[0], q[1], pw(s, q[2]) / 2, 0, Math.PI * 2); ctx.fill(); }
 /* 手書き欄に貼った写真：{t:'img', blob, x, y, w, h}。strokes 配列に入れて元に戻す対象にする */
 const imgCache = new Map();
@@ -863,7 +889,11 @@ function eraseAt(pt) {
 paperEl.addEventListener('pointerdown', e => {
   if (!S.cur || e.target.closest('.page-del,.sel-del')) return;
   if (e.pointerType === 'pen' && !P.penSeen) { P.penSeen = true; if (!P.penOnly) { setPenOnly(true); toast('ペンを検出しました。指で触るとスクロールになります（手のひらボタンで切替）'); } }
-  if (e.pointerType === 'touch' && P.penOnly && P.tool !== 'select') { P.pan = { id: e.pointerId, y: e.clientY }; paperEl.setPointerCapture(e.pointerId); return; }
+  // ペンのみモードの指：iPad はブラウザ標準のスクロール（慣性つき）、その他は手動スクロール
+  if (e.pointerType === 'touch' && P.penOnly && P.tool !== 'select') {
+    if (!NATIVE_PAN) { P.pan = { id: e.pointerId, y: e.clientY, v: 0, t: e.timeStamp }; paperEl.setPointerCapture(e.pointerId); }
+    return;
+  }
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   const stale = P.drawing || P.erasing || P.drag;
   if (stale) {
@@ -883,23 +913,29 @@ paperEl.addEventListener('pointerdown', e => {
   live(s, 0, ctx => dot(ctx, s));
 });
 paperEl.addEventListener('pointermove', e => {
-  if (P.pan && e.pointerId === P.pan.id) { mainEl.scrollTop -= e.clientY - P.pan.y; P.pan.y = e.clientY; return; }
+  if (P.pan && e.pointerId === P.pan.id) {
+    const dy = e.clientY - P.pan.y, dt = Math.max(1, e.timeStamp - P.pan.t);
+    mainEl.scrollTop -= dy; P.pan.v = 0.8 * (-dy / dt) + 0.2 * P.pan.v; P.pan.y = e.clientY; P.pan.t = e.timeStamp; return;
+  }
+  if (!P.drawing && !P.erasing && !P.drag) return;
+  P.rect = paperEl.getBoundingClientRect(); // スクロールが動いていても位置がずれないよう毎回測る
   if (P.drag && e.pointerId === P.drag.id) { dragMove(toPt(e)); e.preventDefault(); return; }
-  if (!P.drawing && !P.erasing) return;
   let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : []; if (!evs.length) evs = [e];
   if (P.erasing && e.pointerId === P.erasing.id) { for (const ev of evs) eraseAt(toPt(ev)); return; }
   if (P.drawing && e.pointerId === P.drawing.id) {
     const s = P.drawing.s;
     for (const ev of evs) {
       const pt = toPt(ev), last = s.p[s.p.length - 1];
-      if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < 0.8) continue;
+      if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < 0.5) continue;
+      // 筆圧の細かな揺れをならす（位置は補正せず、ペン先どおりに描く）
+      if (P.drawing.type === 'pen') pt[2] = Math.round((last[2] + (pt[2] - last[2]) * 0.35) * 100) / 100;
       s.p.push(pt); const i = s.p.length - 1; live(s, i - 2, ctx => seg(ctx, s, i));
     }
     e.preventDefault();
   }
 });
 function endPointer(e) {
-  if (P.pan && e.pointerId === P.pan.id) { P.pan = null; return; }
+  if (P.pan && e.pointerId === P.pan.id) { flingScroll(P.pan.v); P.pan = null; return; }
   if (P.drag && e.pointerId === P.drag.id) {
     const moved = P.drag.moved; P.drag = null; P.rect = null;
     if (moved) { if (P.sel && P.sel.y + P.sel.h > S.cur.pages * PAGE_H) addPage(); touch(); }
@@ -920,6 +956,25 @@ function endPointer(e) {
 paperEl.addEventListener('pointerup', endPointer);
 paperEl.addEventListener('pointercancel', endPointer);
 paperEl.addEventListener('lostpointercapture', endPointer);
+/* iPad Safari：紙面上のタッチで拡大鏡・選択・ダブルタップ拡大などが割り込まないようにする */
+/* 手動スクロールの慣性（指を離したあと、減速しながら流れる） */
+function flingScroll(v) {
+  if (Math.abs(v) < 0.05) return;
+  let last = performance.now();
+  const step = now => {
+    const dt = Math.min(32, now - last); last = now;
+    mainEl.scrollTop += v * dt; v *= Math.pow(0.995, dt);
+    if (Math.abs(v) > 0.02 && !P.drawing && !P.pan) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+// ペンのみモードで指のときだけ標準スクロールを許可（Apple Pencil は touchType が 'stylus'）
+for (const t of ['touchstart', 'touchmove']) paperEl.addEventListener(t, e => {
+  if (e.target.closest('button')) return;
+  const stylus = [...e.changedTouches].some(x => x.touchType === 'stylus');
+  if (NATIVE_PAN && P.penOnly && !stylus && P.tool !== 'select' && !P.drawing && !P.erasing) return;
+  e.preventDefault();
+}, { passive: false });
 
 /* 写真の選択・移動・拡大縮小 */
 function startSelect(e, pt) {
@@ -1016,7 +1071,9 @@ $('#btnInsertImg').innerHTML = icon('image');
 $('#btnUndo').innerHTML = icon('undo'); $('#btnRedo').innerHTML = icon('redo'); $('#btnPenOnly').innerHTML = icon('hand');
 $('#btnUndo').addEventListener('click', undo); $('#btnRedo').addEventListener('click', redo);
 $('#btnPenOnly').addEventListener('click', () => { setPenOnly(!P.penOnly); toast(P.penOnly ? 'ペンのみで書きます。指はスクロールに使えます' : '指でも書けるようにしました'); });
-function setPenOnly(v) { P.penOnly = v; lsSet('penOnly', v ? '1' : '0'); $('#btnPenOnly').setAttribute('aria-pressed', v); $('#btnPenOnly').classList.toggle('tool', true); }
+/* iPad Safari はタッチがペンか指かを区別できる（touchType）ので、指のスクロールをブラウザ標準に任せられる */
+const NATIVE_PAN = typeof Touch !== 'undefined' && 'touchType' in Touch.prototype;
+function setPenOnly(v) { P.penOnly = v; paperEl.classList.toggle('pen-only', v && NATIVE_PAN); lsSet('penOnly', v ? '1' : '0'); $('#btnPenOnly').setAttribute('aria-pressed', v); $('#btnPenOnly').classList.toggle('tool', true); }
 function setTool(t) {
   P.tool = t; $$('.tool[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
   paperEl.classList.toggle('eraser', t === 'eraser'); paperEl.classList.toggle('select', t === 'select');
@@ -1522,7 +1579,7 @@ $('#btnExport').addEventListener('click', async e => {
     for (const r of await db.all('blobs')) blobs.push({ id: r.id, type: r.blob.type, data: await blobB64(r.blob) });
     const out = { app: 'interview-notes', version: 1, exportedAt: new Date().toISOString(), folders: S.folders, memos: S.memos, blobs };
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: 'application/json' }));
-    a.download = `取材ノート_バックアップ_${today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    a.download = `INTERVIEW-NOTE_バックアップ_${today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     toast('バックアップを書き出しました');
   } catch (err) { toast('書き出しに失敗しました：' + err.message); }
   finally { b.disabled = false; b.textContent = 'すべて書き出す（.json）'; }
@@ -1531,7 +1588,7 @@ $('#impFile').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
   try {
     const j = JSON.parse(await file.text());
-    if (j.app !== 'interview-notes') throw new Error('取材ノートのバックアップではありません');
+    if (j.app !== 'interview-notes') throw new Error('INTERVIEW NOTE のバックアップではありません');
     for (const b of j.blobs || []) { const bin = atob(b.data), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); await db.put('blobs', { id: b.id, blob: new Blob([u8], { type: b.type }) }); }
     for (const f of j.folders || []) await db.put('folders', f);
     for (const m of j.memos || []) await db.put('memos', m);
