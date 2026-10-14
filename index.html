@@ -202,6 +202,9 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .stext{font-size:14px;line-height:1.75;outline:none;border-radius:4px;overflow-wrap:anywhere}
 .stext:focus{background:var(--accent-soft)}
 .tr-text{margin:0;padding:10px 12px;font-size:14.5px;line-height:1.9;overflow-wrap:anywhere;white-space:pre-wrap}
+.asr-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px 0;font-size:13px;color:var(--muted)}
+.asr-line .asr-msg:empty{display:none}
+.asr-line .asr-msg{flex:1;min-width:0}
 .tr-edit{display:block;width:100%;border:0!important;border-radius:0!important;background:transparent!important;padding:10px 12px!important;font-size:14.5px;line-height:1.9;resize:none;overflow:hidden;min-height:60px}
 .tr-edit:focus{background:var(--accent-soft)!important;outline:none}
 .interim{font-size:14px;color:var(--muted);font-style:italic;margin:0;padding:0 4px}
@@ -274,6 +277,22 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
 }
 @media (max-width:480px){ .meta-grid{grid-template-columns:minmax(0,1fr)} .ph-grid{grid-template-columns:minmax(0,1fr)} .ai-form{grid-template-columns:minmax(0,1fr)} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+#printArea{display:none}
+@media print{
+  html,body{height:auto;background:#fff!important;color:#000!important}
+  body>*:not(#printArea){display:none!important}
+  #printArea{display:block;font:11pt/1.8 "Hiragino Sans","Yu Gothic","Meiryo",sans-serif;color:#000}
+  #printArea h1{font-size:18pt;margin:0 0 8pt}
+  #printArea h2{font-size:13pt;margin:16pt 0 6pt;border-bottom:1px solid #999;padding-bottom:2pt;break-after:avoid}
+  #printArea h3{font-size:11.5pt;margin:10pt 0 4pt;break-after:avoid}
+  #printArea table{border-collapse:collapse;margin-bottom:8pt}
+  #printArea td{padding:2pt 10pt 2pt 0;vertical-align:top}
+  #printArea img{max-width:100%;break-inside:avoid;display:block;margin:6pt 0}
+  #printArea .pg{max-height:24cm;border:1px solid #ccc}
+  #printArea figure{margin:0 0 8pt;break-inside:avoid}
+  #printArea figcaption{font-size:9.5pt;color:#333}
+  #printArea p{margin:0 0 6pt;white-space:pre-wrap}
+}
 </style>
 </head>
 <body>
@@ -312,6 +331,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
             <button class="icon-btn only-narrow" data-nav aria-label="メニュー">☰</button>
             <span class="crumb" id="crumb"></span>
             <span class="save-state" id="saveState">保存済み</span>
+            <button class="btn sm" id="btnFileSave" title="メモをWord・PDF・テキストのファイルに保存">ファイルに保存</button>
           </div>
           <input class="title-input" id="memoTitle" aria-label="メモのタイトル" placeholder="取材メモのタイトル">
           <div class="meta-grid">
@@ -469,11 +489,18 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
     <section>
       <h3>録音</h3>
       <label>録音ボタンの動作<select id="setRecMode">
-        <option value="both">録音＋文字起こし</option>
+        <option value="local">録音＋停止後に端末内で文字起こし（iPad におすすめ・無料）</option>
+        <option value="both">録音＋同時に文字起こし（パソコンの Chrome / Edge 向け）</option>
         <option value="text">文字起こしのみ（音声は録音しない）</option>
         <option value="rec">録音のみ</option>
       </select></label>
-      <p class="small">iPad で「録音＋文字起こし」だと文字起こしが止まる場合は、「文字起こしのみ」を試してください。iPad はマイクを録音と文字起こしで同時に使えないことがあります。</p>
+      <p class="small">「端末内で文字起こし」は、録音を止めたあとに端末の中のAIが文字にします。音声は外部に送りません。処理には録音時間の数分の1〜同じくらいの時間がかかります（端末の性能によります）。</p>
+      <label>端末内で文字起こしするときの精度<select id="setAsrModel">
+        <option value="base">標準（速い・初回ダウンロード 約80〜160MB）</option>
+        <option value="small">高精度（時間がかかる・初回ダウンロード 約240〜390MB）</option>
+      </select></label>
+      <div class="pane-actions"><button type="button" class="btn" id="btnAsrPreload">文字起こしAIを今ダウンロード（Wi-Fi推奨）</button></div>
+      <p class="small" id="asrInfo" aria-live="polite"></p>
       <div class="pane-actions"><button type="button" class="btn" id="btnSRTest">文字起こしをテスト（10秒）</button></div>
       <p class="small" id="srTestOut" aria-live="polite"></p>
     </section>
@@ -518,6 +545,28 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
     <div class="dlg-actions"><button value="cancel" class="btn">閉じる</button></div>
   </form>
 </dialog>
+
+<dialog id="dlgExport">
+  <form method="dialog">
+    <h2>ファイルに保存</h2>
+    <fieldset><legend>含める内容</legend>
+      <label class="chk"><input type="checkbox" id="exInfo" checked>取材情報・質問リスト</label>
+      <label class="chk"><input type="checkbox" id="exHw" checked>手書きメモ（画像）・テキストボックス</label>
+      <label class="chk"><input type="checkbox" id="exPh" checked>写真</label>
+      <label class="chk"><input type="checkbox" id="exTr" checked>文字起こし</label>
+      <label class="chk"><input type="checkbox" id="exCol" checked>AIコラム（表示中のもの）</label>
+    </fieldset>
+    <div class="pane-actions">
+      <button type="button" class="btn primary" data-fmt="docx">Word（.docx）</button>
+      <button type="button" class="btn" data-fmt="pdf">PDF</button>
+      <button type="button" class="btn" data-fmt="txt">テキスト（.txt）</button>
+    </div>
+    <p class="small" id="exMsg">PDF は印刷画面が開きます。パソコンは「PDFに保存」、iPad は右上の共有ボタン →「ファイルに保存」を選んでください。</p>
+    <div class="dlg-actions"><button value="cancel" class="btn">閉じる</button></div>
+  </form>
+</dialog>
+
+<div id="printArea" aria-hidden="true"></div>
 
 <dialog id="dlgView" class="viewer">
   <form method="dialog" style="padding:0;gap:0">
@@ -569,8 +618,8 @@ const db = {
   d: null,
   open() {
     return new Promise((res, rej) => {
-      const r = indexedDB.open('interview-notes', 1);
-      r.onupgradeneeded = () => { const d = r.result; for (const s of ['folders', 'memos', 'blobs']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); };
+      const r = indexedDB.open('interview-notes', 2);
+      r.onupgradeneeded = () => { const d = r.result; for (const s of ['folders', 'memos', 'blobs', 'pcm']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); };
       r.onsuccess = () => { this.d = r.result; res(); };
       r.onerror = () => rej(r.error);
     });
@@ -583,6 +632,7 @@ const db = {
   },
   all(s) { return this.run(s, 'readonly', o => o.getAll()); },
   keys(s) { return this.run(s, 'readonly', o => o.getAllKeys()); },
+  keysPrefix(s, p) { return this.run(s, 'readonly', o => o.getAllKeys(IDBKeyRange.bound(p, p + '￿'))); },
   get(s, id) { return this.run(s, 'readonly', o => o.get(id)); },
   put(s, v) { return this.run(s, 'readwrite', o => o.put(v)); },
   del(s, id) { return this.run(s, 'readwrite', o => o.delete(id)); }
@@ -731,7 +781,7 @@ $('#btnDelMemo').addEventListener('click', e => {
 });
 async function removeMemo(m, silent) {
   clearTimeout(saveTimers.get(m.id)); saveTimers.delete(m.id);
-  for (const r of m.recordings) await delBlob(r.blob);
+  for (const r of m.recordings) { await delBlob(r.blob); for (const k of await db.keysPrefix('pcm', r.id + '-')) await db.del('pcm', k); }
   for (const p of m.photos) await delBlob(p.blob);
   for (const id of new Set([...(m.paperBlobs || []), ...m.strokes.filter(s => s.t === 'img').map(s => s.blob)])) await delBlob(id);
   await db.del('memos', m.id); S.memos = S.memos.filter(x => x !== m); addTomb('memos', m.id);
@@ -1256,7 +1306,16 @@ const R = { on: false, busy: false, sess: null, memo: null, id: null, stream: nu
 const elapsed = () => (performance.now() - R.t0) / 1000;
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 /* 録音モード：both=録音＋文字起こし / text=文字起こしのみ / rec=録音のみ */
-const recMode = () => { if (!SR) return 'rec'; const m = lsGet('recMode'); return m || (lsGet('liveTranscribe') === '0' ? 'rec' : 'both'); };
+/* local=録音＋停止後に端末内で文字起こし / both=録音＋ブラウザの音声認識で同時に / text=文字起こしのみ / rec=録音のみ */
+const recMode = () => {
+  let m = lsGet('recMode');
+  // iPad は同時の文字起こしが動かないため、一度だけ「端末内で文字起こし」に切り替える
+  if (IS_IOS && lsGet('recModeV2') !== '1') { lsSet('recModeV2', '1'); if (!m || m === 'both' || m === 'text') { m = 'local'; lsSet('recMode', m); } }
+  if (!m) m = lsGet('liveTranscribe') === '0' ? 'rec' : (SR && !IS_IOS ? 'both' : 'local');
+  if ((m === 'both' || m === 'text') && !SR) m = 'local';
+  return m;
+};
+const DEVICE_ID = lsGet('deviceId') || (() => { const id = uid(); lsSet('deviceId', id); return id; })();
 const SR_ADVICE = {
   'not-allowed': 'マイクの使用が許可されていません。iPad の「設定」→「アプリ」→「Safari」→「マイク」を「許可」にし、ページを開き直してください。',
   'service-not-allowed': '音声認識が使えない状態です。iPad の「設定」→「一般」→「キーボード」→「音声入力」をオンにしてください。ホーム画面から起動している場合は、Safari で開くと動くことがあります。',
@@ -1268,16 +1327,18 @@ const SR_ADVICE = {
 $('#btnRec').addEventListener('click', () => { if (R.busy) return; R.on ? stopRec() : startRec(); });
 async function startRec() {
   if (!S.cur || R.on || R.busy) return;
-  const mode = recMode(), wantSR = mode !== 'rec', wantAudio = mode !== 'text';
+  const mode = recMode(), wantSR = mode === 'both' || mode === 'text', wantAudio = mode !== 'text', wantPCM = mode === 'local';
   if (wantAudio && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder)) {
     if (!wantSR) { toast('このブラウザでは録音できません。Safari / Chrome / Edge の最新版で開いてください'); return; }
   }
-  const sess = { memo: S.cur, id: uid(), rec: null, stream: null, chunks: [], t0: performance.now(), startedAt: Date.now(), saved: false, dur: null, note: '', textOnly: !wantAudio };
+  // 音声の取り込み用。iPad ではボタンを押した直後（待ち時間の前）に作らないと動かない
+  if (wantAudio) { try { stopMeter(); const AC = window.AudioContext || window.webkitAudioContext; R.ac = new AC(); R.ac.resume && R.ac.resume().catch(() => {}); } catch { R.ac = null; } }
+  const sess = { memo: S.cur, id: uid(), rec: null, stream: null, chunks: [], t0: performance.now(), startedAt: Date.now(), saved: false, dur: null, note: '', textOnly: !wantAudio, wantPCM, cap: null };
   Object.assign(R, { on: true, busy: true, sess, memo: sess.memo, id: sess.id, stream: null, t0: sess.t0, startedAt: sess.startedAt, srOff: !wantSR, srFails: 0, srDelay: 250, segStart: null, interim: '', flushing: false, srMsg: '', srSuggest: false });
   // 画面の切り替えを先に済ませ、停止ボタンがすぐ使えるようにする
   updateRecUI(); renderTranscript();
   R.timer = setInterval(() => { $('#recTime').textContent = fmtTime(elapsed()); }, 500);
-  $('#liveText').textContent = wantSR ? '話し始めると、ここに文字が表示されます' : '録音のみ（文字起こしは設定でオフ）';
+  $('#liveText').textContent = wantSR ? '話し始めると、ここに文字が表示されます' : wantPCM ? '録音中（停止すると、端末の中で文字起こしします）' : '録音のみ（文字起こしは設定でオフ）';
   try {
     // iPad では先に音声認識にマイクを渡してから録音を始めると、同時に動きやすい
     if (wantSR) { await new Promise(res => { const t = setTimeout(res, 1500); R.onSRStart = () => { clearTimeout(t); res(); }; startSR(); }); R.onSRStart = null; }
@@ -1287,7 +1348,7 @@ async function startRec() {
       try { stream = await navigator.mediaDevices.getUserMedia({ audio: IS_IOS ? true : { echoCancellation: true, noiseSuppression: true } }); }
       catch {
         if (wantSR && !R.srOff) { sess.textOnly = true; toast('マイクで録音できなかったため、文字起こしのみ行います', 6000); }
-        else { R.on = false; clearInterval(R.timer); updateRecUI(); toast('マイクを使えませんでした。ブラウザの設定でこのページのマイクを「許可」にしてください', 6000); return; }
+        else { R.on = false; clearInterval(R.timer); stopMeter(); updateRecUI(); toast('マイクを使えませんでした。ブラウザの設定でこのページのマイクを「許可」にしてください', 6000); return; }
       }
       if (stream && !(R.on && R.sess === sess)) { stream.getTracks().forEach(t => t.stop()); return; }
       if (stream) {
@@ -1303,6 +1364,7 @@ async function startRec() {
           stream.getAudioTracks().forEach(t => t.addEventListener('ended', () => { if (R.on && R.sess === sess) stopRec('マイクが使えなくなったため、ここまでの音声を保存しました。'); }));
           rec.start(1000);
           startMeter();
+          if (wantPCM) await startCapture(sess);
         }
       }
     }
@@ -1382,6 +1444,7 @@ function stopRec(note) {
   R.interim = '';
   const sr = R.sr; R.sr = null;
   try { sr && sr.stop(); } catch {}
+  try { stopCapture(sess); } catch {}
   try { stopMeter(); } catch {}
   try { R.wake && R.wake.release(); } catch {} R.wake = null;
   try { if (sess.rec && sess.rec.state !== 'inactive') sess.rec.stop(); else finalizeRec(sess); }
@@ -1407,14 +1470,56 @@ async function finalizeRec(sess) {
   const bid = uid();
   try { await db.put('blobs', { id: bid, blob }); }
   catch (e) { toast('録音の保存に失敗しました：' + (e && e.message || e), 6000); return; }
-  m.recordings.push({ id: sess.id, blob: bid, mime: blob.type, dur: Math.round(dur), startedAt: sess.startedAt });
+  const entry = { id: sess.id, blob: bid, mime: blob.type, dur: Math.round(dur), startedAt: sess.startedAt };
+  if (sess.cap) { await Promise.all(sess.cap.saves); entry.pcm = sess.cap.n; }
+  if (sess.wantPCM && entry.pcm) Object.assign(entry, { asr: 'pending', asrDev: DEVICE_ID, asrDone: 0 });
+  m.recordings.push(entry);
   markDirty(m); renderTree();
   if (S.cur === m) renderTranscript();
-  toast(`${sess.note}録音を保存しました（${fmtTime(dur)}）`, sess.note ? 6000 : 3400);
+  toast(`${sess.note}録音を保存しました（${fmtTime(dur)}）` + (entry.asr ? '。続けて端末の中で文字起こしします' : ''), sess.note ? 6000 : 4000);
+  if (entry.asr) processAsrQueue();
+}
+/* ---- 文字起こし用に、録音中の音声を 16kHz・モノラルで30秒ずつ端末内に保存する ---- */
+const PCM_RATE = 16000, PCM_CHUNK = PCM_RATE * 30;
+const TAP_WORKLET = "class Tap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(4096);this.n=0}process(i){const c=i[0];if(c&&c[0]){const a=c[0],d=c[1];for(let k=0;k<a.length;k++){this.b[this.n++]=d?(a[k]+d[k])/2:a[k];if(this.n===4096){this.port.postMessage(this.b.slice(0));this.n=0}}}return true}}registerProcessor('tap',Tap);";
+function makeDown(rate) {
+  const r = rate / PCM_RATE; let pos = 0, acc = 0, cnt = 0;
+  return (f32, emit) => { for (let i = 0; i < f32.length; i++) { acc += f32[i]; cnt++; if (++pos >= r) { emit(acc / cnt); pos -= r; acc = 0; cnt = 0; } } };
+}
+async function startCapture(sess) {
+  const ac = R.ac; if (!ac || !sess.stream) return;
+  const cap = sess.cap = { buf: new Int16Array(PCM_CHUNK), len: 0, n: 0, saves: [], down: makeDown(ac.sampleRate), nodes: [] };
+  const emit = v => { const s = v < -1 ? -1 : v > 1 ? 1 : v; cap.buf[cap.len++] = s < 0 ? s * 32768 : s * 32767; if (cap.len === PCM_CHUNK) flushPcm(sess); };
+  const onData = f32 => { if (sess.cap === cap && !cap.stopped) cap.down(f32, emit); };
+  const src = ac.createMediaStreamSource(sess.stream), mute = ac.createGain(); mute.gain.value = 0; mute.connect(ac.destination);
+  try {
+    if (!ac.audioWorklet || !window.AudioWorkletNode) throw 0;
+    const url = URL.createObjectURL(new Blob([TAP_WORKLET], { type: 'application/javascript' }));
+    try { await ac.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    const node = new AudioWorkletNode(ac, 'tap'); node.port.onmessage = e => onData(e.data);
+    src.connect(node); node.connect(mute); cap.nodes = [src, node, mute];
+  } catch {
+    const sp = ac.createScriptProcessor(4096, 1, 1); sp.onaudioprocess = e => onData(e.inputBuffer.getChannelData(0));
+    src.connect(sp); sp.connect(mute); cap.nodes = [src, sp, mute];
+  }
+}
+function flushPcm(sess) {
+  const cap = sess.cap; if (!cap || !cap.len) return;
+  const data = cap.len === PCM_CHUNK ? cap.buf : cap.buf.slice(0, cap.len);
+  const id = `${sess.id}-${String(cap.n).padStart(5, '0')}`; cap.n++;
+  cap.saves.push(db.put('pcm', { id, rec: sess.id, data }).catch(() => {}));
+  cap.buf = new Int16Array(PCM_CHUNK); cap.len = 0;
+}
+function stopCapture(sess) {
+  const cap = sess && sess.cap; if (!cap || cap.stopped) return;
+  cap.stopped = true;
+  for (const n of cap.nodes) { try { n.disconnect(); } catch {} if (n.port) n.port.onmessage = null; if (n.onaudioprocess) n.onaudioprocess = null; }
+  flushPcm(sess);
 }
 function startMeter() {
   try {
-    const AC = window.AudioContext || window.webkitAudioContext; R.ac = new AC(); R.ac.resume && R.ac.resume().catch(() => {});
+    if (!R.ac) { const AC = window.AudioContext || window.webkitAudioContext; R.ac = new AC(); }
+    R.ac.resume && R.ac.resume().catch(() => {});
     const an = R.ac.createAnalyser(); an.fftSize = 512; R.ac.createMediaStreamSource(R.stream).connect(an);
     const buf = new Uint8Array(an.fftSize), bar = $('#meterBar');
     const loop = () => { an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) { const d = (v - 128) / 128; s += d * d; } bar.style.transform = `scaleX(${Math.min(1, Math.sqrt(s / buf.length) * 5)})`; R.raf = requestAnimationFrame(loop); };
@@ -1430,6 +1535,157 @@ function updateRecUI() {
   $('#recMeta').hidden = !R.on; $('#liveLine').hidden = !R.on;
   if (!R.on) $('#recTime').textContent = '00:00';
 }
+/* ---------- 端末内の文字起こし（Whisper・音声は外部に送らない） ----------
+   音声認識モデルは初回だけダウンロードし、ブラウザに保存して再利用する。
+   処理は別スレッド（Worker）で行い、画面やペンの動きを止めない。 */
+const TJS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js';
+const ASR_MODELS = { base: 'onnx-community/whisper-base', small: 'onnx-community/whisper-small' };
+const asrModelKey = () => lsGet('asrModel') || (navigator.gpu ? 'small' : 'base');
+const ASR = { worker: null, ready: false, loading: null, key: '', device: '', busy: false, seq: 0, wait: new Map(), files: {}, pct: 0, cur: null };
+const ASR_WORKER = `
+import { pipeline, env } from '${TJS_URL}';
+env.allowLocalModels = false;
+let asr = null;
+self.onmessage = async (e) => {
+  const d = e.data;
+  try {
+    if (d.type === 'load') {
+      const make = (dev) => pipeline('automatic-speech-recognition', d.model, {
+        device: dev,
+        dtype: dev === 'webgpu' ? { encoder_model: d.f16 ? 'fp16' : 'fp32', decoder_model_merged: 'q4' } : { encoder_model: 'q8', decoder_model_merged: 'q8' },
+        progress_callback: (p) => self.postMessage({ type: 'progress', p: { status: p.status, file: p.file, loaded: p.loaded, total: p.total } })
+      });
+      let device = d.device;
+      try { asr = await make(device); } catch (err) { if (device === 'wasm') throw err; device = 'wasm'; asr = await make('wasm'); }
+      self.postMessage({ type: 'ready', device });
+    } else if (d.type === 'run') {
+      const out = await asr(d.audio, { language: 'japanese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 });
+      self.postMessage({ type: 'result', id: d.id, text: (out && out.text) || '' });
+    }
+  } catch (err) { self.postMessage({ type: 'error', id: d.id, message: String((err && err.message) || err) }); }
+};`;
+async function asrEnsure() {
+  const key = asrModelKey();
+  if (ASR.worker && ASR.ready && ASR.key === key) return;
+  if (ASR.loading && ASR.key === key) return ASR.loading;
+  if (ASR.worker) { ASR.worker.terminate(); ASR.worker = null; ASR.ready = false; }
+  ASR.key = key; ASR.files = {}; ASR.pct = 0;
+  ASR.loading = (async () => {
+    let device = 'wasm', f16 = false;
+    try { if (navigator.gpu) { const ad = await navigator.gpu.requestAdapter(); if (ad) { device = 'webgpu'; f16 = ad.features.has('shader-f16'); } } } catch {}
+    const w = new Worker(URL.createObjectURL(new Blob([ASR_WORKER], { type: 'text/javascript' })), { type: 'module' });
+    ASR.worker = w;
+    await new Promise((res, rej) => {
+      w.onmessage = e => {
+        const d = e.data;
+        if (d.type === 'progress') {
+          if (d.p.file && d.p.total) { ASR.files[d.p.file] = d.p; const fs = Object.values(ASR.files); ASR.pct = Math.floor(100 * fs.reduce((a, f) => a + (f.loaded || 0), 0) / Math.max(1, fs.reduce((a, f) => a + (f.total || 0), 0))); asrStatus(); }
+        } else if (d.type === 'ready') { ASR.ready = true; ASR.device = d.device; res(); asrStatus(); }
+        else if (d.id == null && d.type === 'error') rej(new Error(d.message));
+        else { const p = ASR.wait.get(d.id); if (p) { ASR.wait.delete(d.id); d.type === 'result' ? p.res(d.text) : p.rej(new Error(d.message)); } }
+      };
+      w.onerror = e => {
+        e.preventDefault && e.preventDefault();
+        rej(new Error('文字起こしの機能を読み込めませんでした（初回はインターネット接続が必要です）'));
+        // 処理中に止まった場合（メモリ不足など）は、待っている処理をエラーで終わらせる
+        for (const p of ASR.wait.values()) p.rej(new Error('文字起こしの処理が止まりました（端末のメモリ不足の可能性があります）。「高精度」の場合は「標準」に切り替えてお試しください'));
+        ASR.wait.clear(); if (ASR.worker === w) { ASR.worker = null; ASR.ready = false; } try { w.terminate(); } catch {}
+      };
+      w.postMessage({ type: 'load', model: ASR_MODELS[key], device, f16 });
+    });
+  })();
+  try { await ASR.loading; }
+  catch (e) { try { ASR.worker && ASR.worker.terminate(); } catch {} ASR.worker = null; ASR.ready = false; throw e; }
+  finally { ASR.loading = null; }
+}
+function asrRun(f32) {
+  const id = ++ASR.seq;
+  return new Promise((res, rej) => { ASR.wait.set(id, { res, rej }); ASR.worker.postMessage({ type: 'run', id, audio: f32 }, [f32.buffer]); });
+}
+const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+const nextAsrJob = () => { for (const m of S.memos) for (const r of m.recordings) if ((r.asr === 'pending' || r.asr === 'running') && r.asrDev === DEVICE_ID) return { m, r }; return null; };
+async function processAsrQueue() {
+  if (ASR.busy) return; ASR.busy = true;
+  let wake = null;
+  try {
+    for (;;) {
+      const job = nextAsrJob(); if (!job) break;
+      while (R.on) await sleepMs(2000); // 録音中は処理を待つ（録音と書き込みを優先）
+      if (!wake && navigator.wakeLock) wake = await navigator.wakeLock.request('screen').catch(() => null);
+      await transcribeRec(job.m, job.r);
+    }
+  } finally { ASR.busy = false; try { wake && wake.release(); } catch {} }
+}
+async function transcribeRec(m, r) {
+  r.asr = 'running'; r.asrErr = ''; ASR.cur = r; asrStatus();
+  try {
+    await asrEnsure();
+    const keys = (await db.keysPrefix('pcm', r.id + '-')).sort();
+    if (keys.length) {
+      // 録音中に保存した音声を、2分（30秒×4）ずつ処理
+      r.asrTotal = keys.length;
+      for (let i = r.asrDone || 0; i < keys.length; i += 4) {
+        const part = []; for (const k of keys.slice(i, i + 4)) { const row = await db.get('pcm', k); if (row) part.push(row.data); }
+        const f = new Float32Array(part.reduce((a, x) => a + x.length, 0)); let o = 0;
+        for (const x of part) { for (let j = 0; j < x.length; j++) f[o + j] = x[j] / 32768; o += x.length; }
+        await asrWindow(m, r, f, i * 30);
+        if (!S.memos.includes(m)) return;
+        r.asrDone = Math.min(keys.length, i + 4); markDirty(m); asrStatus();
+      }
+      for (const k of keys) await db.del('pcm', k);
+    } else {
+      // 保存済みの音声ファイルから（短い録音のみ）
+      const pcm = await decodeTo16k(r), W = PCM_RATE * 120;
+      r.asrTotal = Math.max(1, Math.ceil(pcm.length / W));
+      for (let i = r.asrDone || 0; i < r.asrTotal; i++) { await asrWindow(m, r, pcm.slice(i * W, (i + 1) * W), i * 120); r.asrDone = i + 1; markDirty(m); asrStatus(); }
+    }
+    r.asr = 'done'; delete r.asrDone; delete r.asrTotal; delete r.pcm; markDirty(m);
+    if (S.cur === m) toast('文字起こしが完了しました');
+  } catch (e) { r.asr = 'error'; r.asrErr = (e && e.message) || String(e); markDirty(m); }
+  finally { ASR.cur = null; if (S.cur === m) renderTranscript(); }
+}
+async function asrWindow(m, r, f, t) {
+  let s = 0, n = 0; for (let i = 0; i < f.length; i += 8) { s += f[i] * f[i]; n++; }
+  if (!n || Math.sqrt(s / n) < 0.004) return; // ほぼ無音は飛ばす（無音から文章を作ってしまうのを防ぐ）
+  const text = (await asrRun(f)).replace(/(ご視聴|ご清聴)ありがとうございました。?/g, '').replace(/([、。！？「」『』（）])\s+/g, '$1').replace(/\s+([、。！？」』）])/g, '$1').trim();
+  if (!text) return;
+  m.transcript.push({ id: uid(), rec: r.id, t, text });
+  if (S.cur === m) { const p = $(`#trList .grp[data-rec="${r.id}"] .tr-text`); if (p) p.textContent = joinSegs(m.transcript.filter(x => x.rec === r.id)); else renderTranscript(); }
+}
+async function decodeTo16k(r) {
+  if (!r.blob) throw new Error('音声が残っていないため文字起こしできません');
+  if ((r.dur || 0) > 15 * 60) throw new Error('15分を超える録音は、あとからの文字起こしに対応していません。「設定」で録音ボタンを「録音＋停止後に端末内で文字起こし」にして録音すると、長時間でも文字起こしできます');
+  const row = await db.get('blobs', r.blob); if (!row) throw new Error('音声ファイルが見つかりません');
+  const AC = window.AudioContext || window.webkitAudioContext, ac = new AC();
+  try {
+    const buf = await ac.decodeAudioData(await row.blob.arrayBuffer());
+    const out = new Float32Array(Math.ceil(buf.duration * PCM_RATE) + 16); let n = 0;
+    const down = makeDown(buf.sampleRate), emit = v => { if (n < out.length) out[n++] = v; };
+    const a = buf.getChannelData(0), b = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+    for (let i = 0; i < a.length; i += 65536) {
+      let blk = a.subarray(i, i + 65536);
+      if (b) { const bb = b.subarray(i, i + 65536), mix = new Float32Array(blk.length); for (let j = 0; j < blk.length; j++) mix[j] = (blk[j] + bb[j]) / 2; blk = mix; }
+      down(blk, emit);
+    }
+    return out.subarray(0, n);
+  } catch (e) { throw new Error(e && e.message && /文字起こし|見つかりません/.test(e.message) ? e.message : 'この録音の音声を読み込めませんでした'); }
+  finally { try { ac.close(); } catch {} }
+}
+function asrLineText(r) {
+  if (r.asr === 'pending') return R.on ? '録音が終わったら、端末の中で文字起こしします' : '文字起こしの準備中…';
+  if (r.asr === 'running') {
+    if (!ASR.ready) return `文字起こしの準備中… ${ASR.pct || 0}%（初回のみ音声認識AIをダウンロードします。Wi-Fi推奨）`;
+    const pct = r.asrTotal ? Math.floor(100 * (r.asrDone || 0) / r.asrTotal) : 0;
+    return `端末の中で文字起こし中… ${pct}%（アプリを開いたままお待ちください）`;
+  }
+  if (r.asr === 'error') return '文字起こしできませんでした：' + (r.asrErr || '');
+  return '';
+}
+function asrStatus() {
+  if (S.cur) for (const r of S.cur.recordings) { const el = $(`#trList .asr-line[data-rec="${r.id}"] .asr-msg`); if (el) el.textContent = asrLineText(r); }
+  const info = $('#asrInfo'); if (info && ASR.loading) info.textContent = `ダウンロード中… ${ASR.pct || 0}%`;
+}
+
 window.addEventListener('beforeunload', e => { flushAll(); if (R.on) { e.preventDefault(); e.returnValue = ''; } });
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushAll(); });
 
@@ -1445,10 +1701,10 @@ function renderPanel() { renderTranscript(); renderPhotos(); renderAI(); }
 /* transcript */
 function srNote() {
   const n = $('#srNote'), parts = [];
-  if (!SR) parts.push('このブラウザは自動文字起こしに対応していません。録音のみ行います。iPad は Safari、パソコンは Chrome / Edge の最新版で開いてください。');
-  else if (recMode() === 'rec') parts.push('「録音のみ」モードです。文字起こしは「設定」でオンにできます。');
-  else if (recMode() === 'text') parts.push('「文字起こしのみ」モードです（音声は録音しません）。「設定」で切り替えできます。');
-  if (SR && IS_IOS && navigator.standalone && !R.srMsg && recMode() !== 'rec') parts.push('ホーム画面から起動したアプリでは、iPad の制限で文字起こしが動かないことがあります。うまくいかないときは「設定」の「文字起こしをテスト」で原因を確認できます。');
+  const mode = recMode();
+  if (mode === 'rec') parts.push('「録音のみ」モードです。録音のあとで「この録音を文字起こし」を押すと、端末の中で文字起こしできます（15分以内の録音）。');
+  else if (mode === 'text') parts.push('「文字起こしのみ」モードです（音声は録音しません）。「設定」で切り替えできます。');
+  if (SR && IS_IOS && navigator.standalone && !R.srMsg && (mode === 'both' || mode === 'text')) parts.push('ホーム画面から起動したアプリでは、iPad の制限で文字起こしが動かないことがあります。うまくいかないときは「設定」の「文字起こしをテスト」で原因を確認できます。');
   if (R.srMsg) parts.push(R.srMsg);
   n.hidden = !parts.length;
   n.innerHTML = parts.map(esc).join('<br>') + (R.srSuggest ? '<div style="margin-top:8px"><button class="btn sm" data-act="textonly">文字起こしのみに切り替える</button></div>' : '');
@@ -1469,7 +1725,7 @@ function groupsFor(m) {
   return [...groups, ...(liveG ? [liveG] : []), ...(other ? [other] : [])];
 }
 /* 文字起こしは時刻で区切らず、録音ごとに一続きの文章として扱う */
-const joinSegs = segs => segs.map(s => s.text.trim()).filter(Boolean).join(' ');
+const joinSegs = segs => segs.map(s => s.text.trim()).filter(Boolean).reduce((a, t) => !a ? t : a + (/[。！？、」』）]$/.test(a) ? '' : ' ') + t, '');
 function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
 function renderTranscript() {
   const m = S.cur; srNote();
@@ -1481,15 +1737,32 @@ function renderTranscript() {
         ${g.r.startedAt ? `<span class="muted">${fmtClock(g.r.startedAt)}${g.r.dur != null ? ' · ' + fmtTime(g.r.dur) : ''}</span>` : ''}
         <span class="sp"></span>
         ${g.live ? '<span class="live-tag">● 録音中</span>' : ''}
-        ${!g.live && !g.other && g.r.blob ? `<button class="btn sm ghost danger" data-act="delrec">音声を削除</button>` : ''}
+        ${!g.live && !g.other && g.r.blob ? `<button class="btn sm ghost" data-act="saveaudio">音声を保存</button><button class="btn sm ghost danger" data-act="delrec">音声を削除</button>` : ''}
       </div>
       ${!g.live && !g.other ? (g.r.blob ? `<audio controls preload="metadata" data-blob="${g.r.blob}"></audio>` : `<p class="small" style="padding:6px 12px">${g.r.textOnly ? '音声は録音していません（文字起こしのみ）' : '音声は削除済みです（文字起こしは残っています）'}</p>`) : ''}
-      ${g.live
-        ? `<p class="tr-text">${esc(joinSegs(g.segs)) || `<span class="small">${R.srOff ? '文字起こしは停止中です。' : '話し始めると、ここに文字起こしが表示されます。'}</span>`}</p>`
+      ${!g.live && !g.other ? asrBlock(g) : ''}
+      ${g.live || g.r.asr === 'pending' || g.r.asr === 'running'
+        ? `<p class="tr-text">${esc(joinSegs(g.segs)) || `<span class="small">${g.live ? (R.srOff ? (R.sess && R.sess.wantPCM ? '録音を止めると、端末の中で文字起こしします。' : '文字起こしは停止中です。') : '話し始めると、ここに文字起こしが表示されます。') : '文字起こしが終わると、ここに文章が表示されます。'}</span>`}</p>`
         : `<textarea class="tr-edit" spellcheck="false" aria-label="文字起こし（編集できます）" placeholder="文字起こしはありません">${esc(joinSegs(g.segs))}</textarea>`}
-    </div>`).join('') : '<div class="empty">ツールバーの「録音開始」を押すと、録音と同時に文字起こしが始まります。<br>録音データと文字起こしはこのメモに保存されます。</div>';
+    </div>`).join('') : '<div class="empty">ツールバーの「録音開始」を押すと録音が始まり、止めると文字起こしされます。<br>録音データと文字起こしはこのメモに保存されます。</div>';
   $$('#trList audio[data-blob]').forEach(async a => { const u = await blobURL(a.dataset.blob); if (u) { a.src = u; fixDuration(a); } });
   $$('#trList .tr-edit').forEach(autoGrow);
+}
+/* 録音ごとの「端末内で文字起こし」の状態とボタン */
+function asrBlock(g) {
+  const r = g.r, msg = asrLineText(r), hasText = g.segs.length > 0;
+  let btn = '';
+  if (r.asr === 'error') btn = '<button class="btn sm" data-act="asr">もう一度試す</button>';
+  else if (r.asr !== 'pending' && r.asr !== 'running' && r.blob) btn = `<button class="btn sm ${hasText ? 'ghost' : ''}" data-act="asr" data-redo="${hasText ? 1 : ''}">${hasText ? '端末内で文字起こしし直す' : 'この録音を文字起こし'}</button>`;
+  if (!msg && !btn) return '';
+  return `<div class="asr-line" data-rec="${r.id}"><span class="asr-msg">${esc(msg)}</span>${btn}</div>`;
+}
+function startAsrFor(r, redo) {
+  const m = S.cur;
+  if (redo) m.transcript = m.transcript.filter(s => s.rec !== r.id);
+  if (redo || r.asr !== 'error') r.asrDone = 0;
+  Object.assign(r, { asr: 'pending', asrDev: DEVICE_ID, asrErr: '' });
+  touch(); renderTranscript(); processAsrQueue();
 }
 function appendLiveSeg(seg) {
   const p = $(`#trList .grp[data-rec="${seg.rec}"] .tr-text`);
@@ -1507,6 +1780,23 @@ function fixDuration(a) {
   }, { once: true });
 }
 $('#trList').addEventListener('click', e => {
+  const asrB = e.target.closest('[data-act=asr]');
+  if (asrB) {
+    const r = S.cur.recordings.find(x => x.id === asrB.closest('.grp').dataset.rec); if (!r) return;
+    if (asrB.dataset.redo) armConfirm(asrB, 'もう一度押すと、今の文章を置き換えます', () => startAsrFor(r, true));
+    else startAsrFor(r, false);
+    return;
+  }
+  const sa = e.target.closest('[data-act=saveaudio]');
+  if (sa) {
+    const g = sa.closest('.grp'), r = S.cur.recordings.find(x => x.id === g.dataset.rec); if (!r) return;
+    db.get('blobs', r.blob).then(row => {
+      if (!row) { toast('音声ファイルが見つかりません'); return; }
+      const t = row.blob.type || '', ext = /mp4|m4a|aac/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : 'webm';
+      saveFile(row.blob, `${fileBase(S.cur)}_録音${S.cur.recordings.indexOf(r) + 1}.${ext}`);
+    });
+    return;
+  }
   const del = e.target.closest('[data-act=delrec]');
   if (del) armConfirm(del, 'もう一度押して削除', async () => {
     const r = S.cur.recordings.find(x => x.id === del.closest('.grp').dataset.rec); if (!r) return;
@@ -1601,11 +1891,114 @@ $('#aiKeySave').addEventListener('click', () => { const k = $('#aiKeyInput').val
 $('#aiVer').addEventListener('change', e => { AI.sel = e.target.value; renderAIOut(); });
 $('#aiText').addEventListener('input', e => { const c = S.cur.columns.find(x => x.id === AI.sel); if (c && !e.target.readOnly) { c.text = e.target.value; touch(); } });
 $('#aiCopy').addEventListener('click', () => copyText($('#aiText').value, 'コラムをコピーしました'));
-$('#aiDl').addEventListener('click', () => {
-  const m = S.cur, f = folderOf(m); const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([$('#aiText').value], { type: 'text/markdown' }));
-  a.download = `${(f ? f.name : 'コラム')}_${m.date || today()}.md`.replace(/[\\/:*?"<>|]/g, '_'); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-});
+$('#aiDl').addEventListener('click', () => saveFile(new Blob([$('#aiText').value], { type: 'text/markdown' }), `${fileBase(S.cur)}_コラム.md`));
+
+/* ---------- ファイルに保存（Word / PDF / テキスト・録音） ---------- */
+const DOCX_URL = 'https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.iife.js';
+const fileBase = m => { const f = folderOf(m); return [f && f.name, m.title, m.date].filter(Boolean).join('_').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 80) || 'INTERVIEW-NOTE'; };
+async function saveFile(blob, name) {
+  const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+  // iPad は共有シート（「ファイルに保存」など）を優先
+  if (IS_IOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+}
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Word作成の機能を読み込めませんでした（インターネット接続を確認してください）')); document.head.appendChild(s); }); }
+const b64ToBytes = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+async function imgSizeOf(src) { const i = await loadImg(src); return { w: i.naturalWidth, h: i.naturalHeight }; }
+async function exportData(m, o) {
+  const f = folderOf(m) || { name: '' };
+  const d = { title: m.title || '無題', info: [['企業', f.name], ['取材日', fmtDate(m.date)], ['取材相手', m.person], ['場所', m.place]].filter(x => x[1]), questions: [], pages: [], texts: [], photos: [], transcripts: [], column: '' };
+  if (o.info) d.questions = m.questions.map(q => q.text + (q.done ? '（質問済み）' : ''));
+  if (o.hw) {
+    await Promise.all(m.strokes.filter(s => s.t === 'img').map(s => ensureImg(s.blob)));
+    d.pages = inkPages(m).map(i => hwPageB64(m, i));
+    d.texts = m.strokes.filter(s => s.t === 'text' && s.text.trim()).map(s => s.text);
+  }
+  if (o.ph) for (const p of m.photos) { const row = await db.get('blobs', p.blob); if (row) d.photos.push({ blob: row.blob, caption: p.caption }); }
+  if (o.tr) d.transcripts = groupsFor(m).filter(g => g.segs.length).map(g => ({ label: g.other ? 'その他' : `録音${g.n}${g.r.startedAt ? '（' + fmtClock(g.r.startedAt) + '）' : ''}`, text: joinSegs(g.segs) }));
+  if (o.col) { const c = m.columns.find(c => c.id === AI.sel) || m.columns[0]; if (c) d.column = c.text; }
+  if (!o.info) d.info = [];
+  return d;
+}
+function toTxt(d) {
+  const L = [d.title, ''];
+  if (d.info.length) L.push(...d.info.map(([k, v]) => `${k}：${v}`), '');
+  if (d.questions.length) L.push('■ 質問リスト', ...d.questions.map((q, i) => `Q${i + 1}. ${q}`), '');
+  if (d.texts.length) L.push('■ メモ（テキスト）', ...d.texts.map(t => '・' + t), '');
+  if (d.pages.length) L.push(`（手書きメモ ${d.pages.length}ページは、Word / PDF で保存すると画像で入ります）`, '');
+  if (d.photos.length) L.push('■ 写真', ...d.photos.map((p, i) => `写真${i + 1}：${p.caption || '（キャプションなし）'}`), '');
+  if (d.transcripts.length) { L.push('■ 文字起こし'); for (const t of d.transcripts) L.push(`【${t.label}】`, t.text, ''); }
+  if (d.column) L.push('■ AIコラム', d.column, '');
+  return new Blob(['﻿' + L.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+}
+async function toDocx(d) {
+  if (!window.docx) await loadScript(DOCX_URL);
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } = window.docx;
+  const para = (t, opt = {}) => new Paragraph({ children: [new TextRun({ text: t, ...opt })], spacing: { after: 100 } });
+  const head = (t, level) => new Paragraph({ text: t, heading: level, spacing: { before: 280, after: 120 } });
+  const image = (bytes, w, h, maxW) => { const W = Math.min(maxW, w); return new Paragraph({ children: [new ImageRun({ type: 'jpg', data: bytes, transformation: { width: W, height: Math.round(W * h / w) } })], spacing: { after: 120 } }); };
+  const kids = [head(d.title, HeadingLevel.TITLE)];
+  for (const [k, v] of d.info) kids.push(new Paragraph({ children: [new TextRun({ text: k + '：', bold: true }), new TextRun(v)] }));
+  if (d.questions.length) { kids.push(head('質問リスト', HeadingLevel.HEADING_1)); d.questions.forEach((q, i) => kids.push(para(`Q${i + 1}. ${q}`))); }
+  if (d.texts.length || d.pages.length) kids.push(head('取材メモ', HeadingLevel.HEADING_1));
+  for (const t of d.texts) for (const line of t.split('\n')) kids.push(para(line));
+  for (const b64 of d.pages) kids.push(image(b64ToBytes(b64), LW, PAGE_H, 560));
+  if (d.photos.length) {
+    kids.push(head('写真', HeadingLevel.HEADING_1));
+    for (const [i, p] of d.photos.entries()) {
+      const url = URL.createObjectURL(p.blob); const { w, h } = await imgSizeOf(url); URL.revokeObjectURL(url);
+      kids.push(image(new Uint8Array(await p.blob.arrayBuffer()), w, h, 480), para(`写真${i + 1}${p.caption ? '：' + p.caption : ''}`, { size: 18, color: '555555' }));
+    }
+  }
+  if (d.transcripts.length) { kids.push(head('文字起こし', HeadingLevel.HEADING_1)); for (const t of d.transcripts) kids.push(head(t.label, HeadingLevel.HEADING_2), para(t.text)); }
+  if (d.column) {
+    kids.push(head('AIコラム', HeadingLevel.HEADING_1));
+    for (const line of d.column.split('\n')) {
+      if (/^#\s+/.test(line)) kids.push(head(line.replace(/^#\s+/, ''), HeadingLevel.HEADING_2));
+      else if (/^##+\s+/.test(line)) kids.push(head(line.replace(/^##+\s+/, ''), HeadingLevel.HEADING_3));
+      else if (/^-{3,}\s*$/.test(line)) continue;
+      else if (/^[-*]\s+/.test(line)) kids.push(new Paragraph({ text: line.replace(/^[-*]\s+/, ''), bullet: { level: 0 } }));
+      else if (line.trim()) kids.push(para(line.replace(/\*\*(.+?)\*\*/g, '$1')));
+    }
+  }
+  const doc = new Document({ styles: { default: { document: { run: { font: 'Yu Gothic', size: 21 } } } }, sections: [{ children: kids }] });
+  return Packer.toBlob(doc);
+}
+async function printExport(d) {
+  const area = $('#printArea'), urls = [];
+  const md = s => esc(s).replace(/^#\s+(.+)$/gm, '<h3>$1</h3>').replace(/^##+\s+(.+)$/gm, '<h3>$1</h3>').replace(/^-{3,}\s*$/gm, '').replace(/\*\*(.+?)\*\*/g, '$1');
+  let h = `<h1>${esc(d.title)}</h1>`;
+  if (d.info.length) h += `<table>${d.info.map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`).join('')}</table>`;
+  if (d.questions.length) h += `<h2>質問リスト</h2>${d.questions.map((q, i) => `<p>Q${i + 1}. ${esc(q)}</p>`).join('')}`;
+  if (d.texts.length || d.pages.length) h += `<h2>取材メモ</h2>${d.texts.map(t => `<p>${esc(t)}</p>`).join('')}${d.pages.map(b => `<img class="pg" src="data:image/jpeg;base64,${b}" alt="">`).join('')}`;
+  if (d.photos.length) h += `<h2>写真</h2>${d.photos.map((p, i) => { const u = URL.createObjectURL(p.blob); urls.push(u); return `<figure><img src="${u}" alt=""><figcaption>写真${i + 1}${p.caption ? '：' + esc(p.caption) : ''}</figcaption></figure>`; }).join('')}`;
+  if (d.transcripts.length) h += `<h2>文字起こし</h2>${d.transcripts.map(t => `<h3>${esc(t.label)}</h3><p>${esc(t.text)}</p>`).join('')}`;
+  if (d.column) h += `<h2>AIコラム</h2><div style="white-space:pre-wrap">${md(d.column)}</div>`;
+  area.innerHTML = h;
+  await Promise.all($$('img', area).map(i => i.decode ? i.decode().catch(() => {}) : null));
+  const done = () => { area.innerHTML = ''; urls.forEach(u => URL.revokeObjectURL(u)); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(() => { if (area.innerHTML) done(); }, 60000);
+}
+const dlgExp = $('#dlgExport');
+$('#btnFileSave').addEventListener('click', () => { commitText(); $('#exCol').disabled = !S.cur.columns.length; $('#exMsg').textContent = 'PDF は印刷画面が開きます。パソコンは「PDFに保存」、iPad は右上の共有ボタン →「ファイルに保存」を選んでください。'; dlgExp.showModal(); });
+$$('#dlgExport [data-fmt]').forEach(b => b.addEventListener('click', async () => {
+  const fmt = b.dataset.fmt, m = S.cur, msg = $('#exMsg');
+  const o = { info: $('#exInfo').checked, hw: $('#exHw').checked, ph: $('#exPh').checked, tr: $('#exTr').checked, col: $('#exCol').checked && !$('#exCol').disabled };
+  $$('#dlgExport [data-fmt]').forEach(x => x.disabled = true); msg.textContent = 'ファイルを作成しています…';
+  try {
+    await flushAll();
+    const d = await exportData(m, o);
+    if (fmt === 'txt') { await saveFile(toTxt(d), fileBase(m) + '.txt'); dlgExp.close(); }
+    else if (fmt === 'docx') { const blob = await toDocx(d); await saveFile(blob, fileBase(m) + '.docx'); dlgExp.close(); }
+    else { dlgExp.close(); await printExport(d); }
+  } catch (e) { msg.textContent = '作成できませんでした：' + e.message; }
+  finally { $$('#dlgExport [data-fmt]').forEach(x => x.disabled = false); }
+}));
 $('#aiDel').addEventListener('click', e => armConfirm(e.currentTarget, 'もう一度で削除', () => { S.cur.columns = S.cur.columns.filter(c => c.id !== AI.sel); AI.sel = null; touch(); renderAIOut(); }));
 $('#aiStop').addEventListener('click', () => AI.ctrl && AI.ctrl.abort());
 
@@ -1621,7 +2014,7 @@ async function buildContent(m, o) {
   const f = folderOf(m) || { name: '(企業名未設定)' }; const content = [];
   let head = `# 取材情報\n企業名: ${f.name}\n${f.note ? '企業メモ: ' + f.note + '\n' : ''}取材日: ${m.date || '(未記入)'}\n取材相手: ${m.person || '(未記入)'}\n場所: ${m.place || '(未記入)'}\nメモのタイトル: ${m.title}\n`;
   if (o.q && m.questions.length) head += `\n# 事前に用意した質問\n${m.questions.map((q, i) => `Q${i + 1}. ${q.text}${q.done ? '（質問済み）' : '（未質問の可能性あり）'}`).join('\n')}\n`;
-  if (o.tr) { const t = transcriptText(m); if (t) head += `\n# 録音の文字起こし（ブラウザの音声認識による自動生成。誤認識・話者の区別なしを含む）\n${t}\n`; }
+  if (o.tr) { const t = transcriptText(m); if (t) head += `\n# 録音の文字起こし（音声認識による自動生成。誤認識・話者の区別なしを含む）\n${t}\n`; }
   if (o.hw) { const tbs = m.strokes.filter(s => s.t === 'text' && s.text.trim()); if (tbs.length) head += `\n# メモに入力したテキスト\n${tbs.map(s => '- ' + s.text.replace(/\n/g, ' ')).join('\n')}\n`; }
   content.push({ type: 'text', text: head });
   let hwN = 0, phN = 0;
@@ -1894,7 +2287,10 @@ $('#btnGLogout').addEventListener('click', () => {
 const dlgSet = $('#dlgSettings');
 $('#btnSettings').addEventListener('click', async () => {
   $('#setKey').value = lsGet('apiKey') || ''; $('#setModel').value = MODEL();
-  $('#setRecMode').value = recMode(); $('#setRecMode').disabled = !SR; $('#btnSRTest').disabled = !SR;
+  $('#setRecMode').value = recMode(); $('#btnSRTest').disabled = !SR;
+  for (const o of $('#setRecMode').options) if (o.value === 'both' || o.value === 'text') o.disabled = !SR;
+  $('#setAsrModel').value = asrModelKey();
+  $('#asrInfo').textContent = (navigator.gpu ? 'この端末はGPUで高速に処理できます。' : 'この端末はGPUを使えないため、処理に時間がかかります（「標準」がおすすめ）。') + (ASR.ready ? ` 文字起こしAI（${ASR.key === 'small' ? '高精度' : '標準'}）は準備できています。` : '');
   $('#srTestOut').textContent = SR ? '' : 'このブラウザには音声認識の機能がありません。iPad は Safari、パソコンは Chrome / Edge で開いてください。';
   $('#setGClient').value = gClientId();
   $('#gInfo').textContent = location.protocol === 'https:'
@@ -1907,9 +2303,18 @@ $('#btnSettings').addEventListener('click', async () => {
 dlgSet.addEventListener('close', () => {
   if (dlgSet.returnValue !== 'ok') return;
   lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value);
-  if (SR) lsSet('recMode', $('#setRecMode').value);
+  lsSet('recMode', $('#setRecMode').value);
+  lsSet('asrModel', $('#setAsrModel').value);
   lsSet('gClientId', $('#setGClient').value.trim() || null);
   renderAI(); if (S.cur) srNote(); updateRecUI(); toast('設定を保存しました');
+});
+$('#btnAsrPreload').addEventListener('click', async () => {
+  const b = $('#btnAsrPreload'), info = $('#asrInfo');
+  lsSet('asrModel', $('#setAsrModel').value);
+  b.disabled = true; info.textContent = 'ダウンロードを始めています…';
+  try { await asrEnsure(); info.textContent = `準備できました（${ASR.key === 'small' ? '高精度' : '標準'}・${ASR.device === 'webgpu' ? 'GPUで処理' : 'CPUで処理'}）。次回からはダウンロード不要です。`; }
+  catch (e) { info.textContent = '準備できませんでした：' + e.message; }
+  finally { b.disabled = false; }
 });
 /* 音声認識だけを10秒動かして、使えるかどうかと原因を表示する */
 $('#btnSRTest').addEventListener('click', () => {
@@ -1984,6 +2389,8 @@ $('#impFile').addEventListener('change', async e => {
   else if (auth && auth.ok) { lsSet('pendingSync', null); syncNow(false); }
   else if (gToken() && gClientId()) syncNow(true);
   else if (gClientId()) setSyncUI(lsGet('lastSync') ? undefined : '未接続');
+  // 前回途中だった「端末内の文字起こし」を再開
+  if (nextAsrJob()) processAsrQueue();
 })();
 </script>
 </body>
