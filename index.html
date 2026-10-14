@@ -89,7 +89,10 @@ label.chk input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
 .memo-item .mt{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .memo-item .md{font-size:11.5px;color:var(--muted);font-family:var(--font-mono)}
 .memo-list .none{font-size:12px;color:var(--muted);padding:4px 10px}
-.side-foot{padding:10px 14px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
+.side-foot{padding:10px 14px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);display:grid;gap:6px}
+.sync-row{display:flex;align-items:center;gap:8px;min-width:0}
+.sync-state{font-size:11.5px;color:var(--muted);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sync-state.err{color:var(--rec)}
 
 .main{overflow:auto;min-width:0;position:relative;overscroll-behavior:contain}
 .workspace{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:20px;padding-block:18px 48px;padding-inline:24px;align-items:start;max-width:1560px;margin:0 auto}
@@ -283,7 +286,10 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
       <button class="btn primary block" id="btnNewFolder">＋ 企業フォルダを追加</button>
     </div>
     <nav class="tree" id="tree"></nav>
-    <div class="side-foot"><button class="btn ghost block" id="btnSettings">設定・バックアップ</button></div>
+    <div class="side-foot">
+      <div class="sync-row"><button class="btn sm" id="btnSync" title="Googleドライブと同期">⟳ 同期</button><span class="sync-state" id="syncState">未同期</span></div>
+      <button class="btn ghost block" id="btnSettings">設定・バックアップ</button>
+    </div>
   </aside>
 
   <main class="main" id="main">
@@ -472,6 +478,16 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
       <p class="small" id="srTestOut" aria-live="polite"></p>
     </section>
     <section>
+      <h3>Googleドライブ同期</h3>
+      <label>GoogleのクライアントID<input id="setGClient" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
+      <p class="small">データはご自身のGoogleドライブの「アプリ専用の非表示領域」に保存されます。ほかの人やほかのアプリからは見えません。使う端末それぞれで、同じクライアントIDを入力してください。</p>
+      <p class="small mono" id="gInfo" style="user-select:text;-webkit-user-select:text;overflow-wrap:anywhere"></p>
+      <div class="pane-actions">
+        <button type="button" class="btn primary" id="btnSyncNow">保存して今すぐ同期</button>
+        <button type="button" class="btn ghost" id="btnGLogout">この端末の接続を解除</button>
+      </div>
+    </section>
+    <section>
       <h3>バックアップ</h3>
       <p class="small">データ（メモ・録音・写真）はこのブラウザの中に保存されています。ブラウザのデータ消去で失われるため、定期的に書き出してください。</p>
       <div class="pane-actions">
@@ -566,6 +582,7 @@ const db = {
     });
   },
   all(s) { return this.run(s, 'readonly', o => o.getAll()); },
+  keys(s) { return this.run(s, 'readonly', o => o.getAllKeys()); },
   get(s, id) { return this.run(s, 'readonly', o => o.get(id)); },
   put(s, v) { return this.run(s, 'readwrite', o => o.put(v)); },
   del(s, id) { return this.run(s, 'readwrite', o => o.delete(id)); }
@@ -602,7 +619,10 @@ async function persist(m) {
   try { await db.put('memos', m); if (m === S.cur) $('#saveState').textContent = '保存済み'; }
   catch (e) { toast('保存に失敗しました：' + (e && e.message || e)); }
 }
-function flushAll() { for (const [id, t] of saveTimers) { clearTimeout(t); const m = S.memos.find(x => x.id === id); if (m) persist(m); } }
+function flushAll() { const ps = []; for (const [id, t] of saveTimers) { clearTimeout(t); const m = S.memos.find(x => x.id === id); if (m) ps.push(persist(m)); } return Promise.all(ps); }
+/* 削除の記録（同期で、ほかの端末にも削除を伝えるため） */
+function tombs() { try { const t = JSON.parse(lsGet('tombs') || 'null'); if (t && t.memos && t.folders) return t; } catch {} return { memos: {}, folders: {} }; }
+function addTomb(kind, id) { const t = tombs(); t[kind][id] = Date.now(); lsSet('tombs', JSON.stringify(t)); }
 const touch = () => S.cur && markDirty(S.cur);
 
 /* ---------- sidebar ---------- */
@@ -656,9 +676,9 @@ function openFolderDlg(fid) {
 dlgFolder.addEventListener('close', async () => {
   if (dlgFolder.returnValue !== 'ok') return;
   const name = $('#fName').value.trim(); if (!name) return;
-  if (editingFolder) { editingFolder.name = name; editingFolder.note = $('#fNote').value.trim(); await db.put('folders', editingFolder); renderTree(); if (S.cur) fillHead(); }
+  if (editingFolder) { editingFolder.name = name; editingFolder.note = $('#fNote').value.trim(); editingFolder.updatedAt = Date.now(); await db.put('folders', editingFolder); renderTree(); if (S.cur) fillHead(); }
   else {
-    const f = { id: uid(), name, note: $('#fNote').value.trim(), createdAt: Date.now() };
+    const f = { id: uid(), name, note: $('#fNote').value.trim(), createdAt: Date.now(), updatedAt: Date.now() };
     S.folders.push(f); await db.put('folders', f); await createMemo(f.id); toast(`「${name}」を追加し、取材メモを作成しました`);
   }
 });
@@ -668,7 +688,7 @@ $('#fDelete').addEventListener('click', e => {
   if (R.on && ms.includes(R.memo)) { toast('録音中のメモがあるため削除できません'); return; }
   armConfirm(e.currentTarget, ms.length ? `メモ${ms.length}件も削除します。もう一度押して確定` : 'もう一度押して削除', async () => {
     for (const m of ms) await removeMemo(m, true);
-    S.folders = S.folders.filter(x => x !== f); await db.del('folders', f.id);
+    S.folders = S.folders.filter(x => x !== f); await db.del('folders', f.id); addTomb('folders', f.id);
     dlgFolder.close('deleted'); if (!S.cur) showWelcome(); renderTree(); toast(`「${f.name}」を削除しました`);
   });
 });
@@ -714,7 +734,7 @@ async function removeMemo(m, silent) {
   for (const r of m.recordings) await delBlob(r.blob);
   for (const p of m.photos) await delBlob(p.blob);
   for (const id of new Set([...(m.paperBlobs || []), ...m.strokes.filter(s => s.t === 'img').map(s => s.blob)])) await delBlob(id);
-  await db.del('memos', m.id); S.memos = S.memos.filter(x => x !== m);
+  await db.del('memos', m.id); S.memos = S.memos.filter(x => x !== m); addTomb('memos', m.id);
   if (S.cur === m) S.cur = null;
   if (!silent) renderTree();
 }
@@ -1716,12 +1736,170 @@ async function streamClaude(key, content, signal, onText) {
   return text;
 }
 
+/* ---------- Google ドライブ同期 ----------
+   ログインはGoogleの画面へ移動して戻る方式（iPad のホーム画面アプリでも動くように）。
+   データはドライブの appDataFolder（アプリ専用の非表示領域）に保存：
+   state.json＝フォルダ・メモ・削除記録 ／ 録音・写真は1件ずつ別ファイル（kind=blob） */
+const G_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE = 'https://www.googleapis.com/drive/v3/files', UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+const G = { busy: false };
+const gClientId = () => (lsGet('gClientId') || '').trim();
+const gRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/, '');
+function gToken() { try { const t = JSON.parse(lsGet('gTok') || 'null'); return t && t.exp > Date.now() + 60000 ? t.token : null; } catch { return null; } }
+function parseAuthHash() {
+  if (!location.hash || !/(access_token|error)=/.test(location.hash)) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (p.get('error')) return { error: p.get('error') };
+  lsSet('gTok', JSON.stringify({ token: p.get('access_token'), exp: Date.now() + (+p.get('expires_in') || 3600) * 1000 }));
+  return { ok: true };
+}
+async function gAuthRedirect() {
+  if (location.protocol !== 'https:') { toast('同期は GitHub Pages など https:// のアドレスで開いたときに使えます', 6000); return; }
+  if (!gClientId()) { toast('先に「設定・バックアップ」で Google のクライアントIDを入力してください', 6000); $('#btnSettings').click(); return; }
+  commitText(); await flushAll();
+  lsSet('pendingSync', '1');
+  const q = new URLSearchParams({ client_id: gClientId(), redirect_uri: gRedirectUri(), response_type: 'token', scope: G_SCOPE, include_granted_scopes: 'true', state: 'sync' });
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + q;
+}
+async function gFetch(url, opt = {}) {
+  const tok = gToken(); if (!tok) throw Object.assign(new Error('auth'), { auth: true });
+  const res = await fetch(url, { ...opt, headers: { ...(opt.headers || {}), Authorization: 'Bearer ' + tok } });
+  if (res.status === 401) { lsSet('gTok', null); throw Object.assign(new Error('auth'), { auth: true }); }
+  if (!res.ok) {
+    let msg = res.statusText; try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch {}
+    if (res.status === 403 && /has not been used|is disabled/i.test(msg)) msg = 'Google Drive API が有効になっていません。Google Cloud の「APIとサービス」で有効にしてください';
+    throw new Error(`Googleドライブ（${res.status}）：${msg}`);
+  }
+  return res;
+}
+async function gList(q, fields = 'id,name,appProperties,modifiedTime') {
+  const out = []; let page = '';
+  do {
+    const p = new URLSearchParams({ spaces: 'appDataFolder', q, fields: `nextPageToken,files(${fields})`, pageSize: '1000' }); if (page) p.set('pageToken', page);
+    const j = await (await gFetch(DRIVE + '?' + p)).json(); out.push(...(j.files || [])); page = j.nextPageToken;
+  } while (page);
+  return out;
+}
+async function gUpload(name, blob, type, kind, fileId) {
+  type = type || 'application/octet-stream';
+  if (fileId) return (await gFetch(`${UPLOAD}/${fileId}?uploadType=media&fields=id`, { method: 'PATCH', headers: { 'Content-Type': type }, body: blob })).json();
+  const meta = { name, parents: ['appDataFolder'], appProperties: { kind, type } };
+  if (blob.size < 4.5 * 1048576) {
+    const b = 'xx' + uid();
+    const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${type}\r\n\r\n`, blob, `\r\n--${b}--`]);
+    return (await gFetch(`${UPLOAD}?uploadType=multipart&fields=id`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${b}` }, body })).json();
+  }
+  // 大きな録音は分割せずに「再開可能アップロード」で送る
+  const init = await gFetch(`${UPLOAD}?uploadType=resumable&fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': type }, body: JSON.stringify(meta) });
+  const loc = init.headers.get('Location'); if (!loc) throw new Error('大きなファイルのアップロードを開始できませんでした');
+  const res = await fetch(loc, { method: 'PUT', headers: { 'Content-Type': type }, body: blob });
+  if (!res.ok) throw new Error(`録音ファイルのアップロードに失敗しました（${res.status}）`);
+  return res.json();
+}
+function setSyncUI(text, err) {
+  const el = $('#syncState'); el.classList.toggle('err', !!err);
+  const last = +lsGet('lastSync');
+  el.textContent = text || (last ? '最終同期 ' + fmtClock(last) : '未同期'); el.title = el.textContent;
+}
+async function syncNow(silent) {
+  if (G.busy) return;
+  if (R.on) { if (!silent) toast('録音中は同期できません。停止してから同期してください'); return; }
+  if (!gToken()) { if (!silent) gAuthRedirect(); return; }
+  G.busy = true; $('#btnSync').disabled = true; setSyncUI('同期中…');
+  const prevCur = S.cur, prevCurId = S.cur && S.cur.id;
+  try {
+    commitText(); await flushAll();
+    // 1) ドライブの状態を読む
+    const stFiles = (await gList("name = 'state.json'")).sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
+    const stFile = stFiles[0];
+    const remote = stFile ? await (await gFetch(`${DRIVE}/${stFile.id}?alt=media`)).json() : { folders: [], memos: [], tombs: { memos: {}, folders: {} } };
+    // 2) 削除記録をまとめる
+    const lt = tombs(), rt = remote.tombs || { memos: {}, folders: {} }, T = { memos: { ...(rt.memos || {}) }, folders: { ...(rt.folders || {}) } };
+    for (const k of ['memos', 'folders']) for (const [id, ts] of Object.entries(lt[k])) T[k][id] = Math.max(ts, T[k][id] || 0);
+    lsSet('tombs', JSON.stringify(T));
+    // 3) フォルダ・メモごとに新しい方を残す
+    const stamp = x => x.updatedAt || x.createdAt || 0;
+    const merge = (loc, rem, tomb) => {
+      const map = new Map(); for (const x of rem || []) map.set(x.id, x);
+      for (const x of loc) { const r = map.get(x.id); if (!r || stamp(x) >= stamp(r)) map.set(x.id, x); }
+      for (const [id, ts] of Object.entries(tomb)) { const x = map.get(id); if (x && stamp(x) <= ts) map.delete(id); }
+      return [...map.values()];
+    };
+    const localM = new Set(S.memos), localF = new Set(S.folders);
+    const remoteM = new Map((remote.memos || []).map(m => [m.id, m]));
+    let folders = merge(S.folders, remote.folders, T.folders);
+    const memos = merge(S.memos, remote.memos, T.memos).map(m => localM.has(m) ? m : normalize(m));
+    // フォルダが消えたメモは「未分類」へ
+    if (memos.some(m => !folders.some(f => f.id === m.folderId))) {
+      let un = folders.find(f => f.name === '未分類');
+      if (!un) { un = { id: uid(), name: '未分類', note: '同期時にフォルダが見つからなかったメモ', createdAt: Date.now(), updatedAt: Date.now() }; folders = [...folders, un]; }
+      for (const m of memos) if (!folders.some(f => f.id === m.folderId)) { m.folderId = un.id; m.updatedAt = Date.now(); }
+    }
+    let received = 0;
+    const sent = memos.filter(m => localM.has(m) && (!remoteM.has(m.id) || stamp(remoteM.get(m.id)) < stamp(m))).length;
+    // 4) この端末に反映
+    const keepM = new Set(memos.map(m => m.id)), keepF = new Set(folders.map(f => f.id));
+    for (const m of [...S.memos]) if (!keepM.has(m.id)) { await removeMemo(m, true); received++; }
+    for (const f of S.folders) if (!keepF.has(f.id)) { await db.del('folders', f.id); received++; }
+    for (const m of memos) if (!localM.has(m)) { await db.put('memos', m); received++; } else if (!remoteM.has(m.id) || stamp(remoteM.get(m.id)) < stamp(m)) await db.put('memos', m);
+    for (const f of folders) if (!localF.has(f)) await db.put('folders', f);
+    S.folders = folders; S.memos = memos;
+    // 5) 録音・写真：足りない方へ送る／受け取る
+    const need = new Set();
+    for (const m of memos) { for (const r of m.recordings) if (r.blob) need.add(r.blob); for (const p of m.photos) if (p.blob) need.add(p.blob); for (const s of m.strokes) if (s.t === 'img') need.add(s.blob); }
+    const remoteBlobs = new Map((await gList("appProperties has { key='kind' and value='blob' }")).map(f => [f.name.replace(/^blob-/, ''), f]));
+    const localKeys = new Set(await db.keys('blobs'));
+    const up = [...need].filter(id => localKeys.has(id) && !remoteBlobs.has(id));
+    const down = [...need].filter(id => !localKeys.has(id) && remoteBlobs.has(id));
+    let n = 0; const total = up.length + down.length;
+    for (const id of up) { setSyncUI(`送信中 ${++n}/${total}`); const r = await db.get('blobs', id); if (r) await gUpload('blob-' + id, r.blob, r.blob.type, 'blob'); }
+    // 6) 状態を保存（録音・写真を送ってから）
+    setSyncUI('保存中…');
+    const state = new Blob([JSON.stringify({ app: 'interview-notes', version: 1, updatedAt: Date.now(), folders, memos, tombs: T })], { type: 'application/json' });
+    await gUpload('state.json', state, 'application/json', 'state', stFile && stFile.id);
+    for (const id of down) {
+      setSyncUI(`受信中 ${++n}/${total}`);
+      const f = remoteBlobs.get(id), b = await (await gFetch(`${DRIVE}/${f.id}?alt=media`)).blob();
+      const type = (f.appProperties && f.appProperties.type) || b.type;
+      await db.put('blobs', { id, blob: type && type !== b.type ? new Blob([b], { type }) : b });
+    }
+    lsSet('lastSync', String(Date.now()));
+    // 7) 画面を更新
+    renderTree();
+    const cur = prevCurId && S.memos.find(m => m.id === prevCurId);
+    if (cur && cur !== prevCur) openMemo(cur.id);
+    else if (!cur) { const first = S.memos[0]; if (first) openMemo(first.id); else showWelcome(); }
+    else if (down.length) { renderPanel(); redrawAll(); }
+    setSyncUI();
+    const msg = received || sent || total ? `同期しました（受信 ${received + down.length}件・送信 ${sent + up.length}件）` : '同期しました（変更はありませんでした）';
+    if (!silent || received || down.length) toast(msg);
+  } catch (e) {
+    if (e.auth) { setSyncUI('要ログイン', true); if (!silent) gAuthRedirect(); }
+    else { setSyncUI('同期エラー', true); toast('同期できませんでした：' + e.message, 7000); }
+  } finally { G.busy = false; $('#btnSync').disabled = false; }
+}
+$('#btnSync').addEventListener('click', () => syncNow(false));
+$('#btnSyncNow').addEventListener('click', () => {
+  lsSet('gClientId', $('#setGClient').value.trim() || null);
+  dlgSet.close('sync'); syncNow(false);
+});
+$('#btnGLogout').addEventListener('click', () => {
+  const tok = gToken(); lsSet('gTok', null); lsSet('lastSync', null);
+  if (tok) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(tok), { method: 'POST' }).catch(() => {});
+  setSyncUI(); $('#gInfo').textContent = 'この端末の接続を解除しました（ドライブのデータは残っています）。';
+});
+
 /* ---------- settings / backup ---------- */
 const dlgSet = $('#dlgSettings');
 $('#btnSettings').addEventListener('click', async () => {
   $('#setKey').value = lsGet('apiKey') || ''; $('#setModel').value = MODEL();
   $('#setRecMode').value = recMode(); $('#setRecMode').disabled = !SR; $('#btnSRTest').disabled = !SR;
   $('#srTestOut').textContent = SR ? '' : 'このブラウザには音声認識の機能がありません。iPad は Safari、パソコンは Chrome / Edge で開いてください。';
+  $('#setGClient').value = gClientId();
+  $('#gInfo').textContent = location.protocol === 'https:'
+    ? `Google側に登録する値 ― 承認済みの JavaScript 生成元：${location.origin} ／ 承認済みのリダイレクト URI：${gRedirectUri()}` + (gToken() ? '（この端末はGoogleに接続済み）' : '')
+    : '同期は GitHub Pages など https:// のアドレスで開いたときに使えます（パソコンのファイルを直接開いた場合は使えません）。';
   $('#storageInfo').textContent = '';
   try { const est = await navigator.storage.estimate(); $('#storageInfo').textContent = `使用量 ${(est.usage / 1048576).toFixed(1)} MB / 利用可能 ${(est.quota / 1073741824).toFixed(1)} GB`; } catch {}
   dlgSet.returnValue = ''; dlgSet.showModal();
@@ -1730,6 +1908,7 @@ dlgSet.addEventListener('close', () => {
   if (dlgSet.returnValue !== 'ok') return;
   lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value);
   if (SR) lsSet('recMode', $('#setRecMode').value);
+  lsSet('gClientId', $('#setGClient').value.trim() || null);
   renderAI(); if (S.cur) srNote(); updateRecUI(); toast('設定を保存しました');
 });
 /* 音声認識だけを10秒動かして、使えるかどうかと原因を表示する */
@@ -1782,10 +1961,13 @@ $('#impFile').addEventListener('change', async e => {
 
 /* ---------- init ---------- */
 (async function init() {
+  const auth = parseAuthHash();
   try { await db.open(); }
   catch { document.body.innerHTML = '<p style="padding:24px">データの保存領域を開けませんでした。プライベートブラウズを解除するか、Chrome / Edge で開いてください。</p>'; return; }
   S.folders = await db.all('folders'); S.memos = (await db.all('memos')).map(normalize);
-  if (!S.folders.length) {
+  for (const f of S.folders) f.updatedAt ||= f.createdAt || 0;
+  // 同期を使う端末では、サンプルを作らない（各端末のサンプルがドライブに増えないように）
+  if (!S.folders.length && !gClientId() && !auth) {
     const f = { id: uid(), name: 'サンプル株式会社', note: '操作確認用のサンプルです。自由に編集・削除できます', createdAt: Date.now() };
     const m = newMemo(f.id, { title: '代表インタビュー（サンプル）', person: '代表取締役（サンプル）', questions: ['創業のきっかけは？', 'いちばん苦労した時期と、その乗り越え方は？', '社員に大切にしてほしい価値観は？', '今後3年で挑戦したいことは？'].map(t => ({ id: uid(), text: t, done: false })) });
     S.folders.push(f); S.memos.push(m); await db.put('folders', f); await db.put('memos', m);
@@ -1796,6 +1978,12 @@ $('#impFile').addEventListener('change', async e => {
   const last = S.memos.find(x => x.id === lsGet('lastMemo')) || S.memos[0];
   renderTree();
   if (last) openMemo(last.id); else showWelcome();
+  setSyncUI();
+  // Googleのログイン画面から戻ってきたら続けて同期／接続済みなら起動時に自動で同期
+  if (auth && auth.error) { lsSet('pendingSync', null); toast(auth.error === 'access_denied' ? 'Googleへのアクセスが許可されませんでした' : 'Googleへのログインに失敗しました：' + auth.error, 6000); setSyncUI('未接続', true); }
+  else if (auth && auth.ok) { lsSet('pendingSync', null); syncNow(false); }
+  else if (gToken() && gClientId()) syncNow(true);
+  else if (gClientId()) setSyncUI(lsGet('lastSync') ? undefined : '未接続');
 })();
 </script>
 </body>
