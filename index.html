@@ -161,8 +161,12 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .paper.select{cursor:default}
 .sel-box{position:absolute;z-index:2;border:2px solid var(--accent);pointer-events:none;box-shadow:0 0 0 1px #fff}
 .sel-handle{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 1px 4px rgb(0 0 0/.3)}
-.sel-del{position:absolute;top:6px;right:6px;pointer-events:auto;min-height:28px;font-size:12px;background:#fff;color:#a3302a;border-color:#e3c4c0}
+.sel-btns{position:absolute;top:6px;right:6px;display:flex;gap:6px}
+.sel-del,.sel-edit{pointer-events:auto;min-height:28px;font-size:12px;background:#fff;color:#a3302a;border-color:#e3c4c0}
+.sel-edit{color:#2346c8;border-color:#c3cdf0}
 .sel-del.armed{color:#fff}
+.tb-editor{position:absolute;z-index:3;margin:0;box-sizing:border-box;border:1.5px dashed #2346c8!important;border-radius:4px!important;background:rgb(255 255 255/.7)!important;min-height:0!important;resize:none;overflow:hidden;font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;font-weight:500;line-height:1.5;user-select:text;-webkit-user-select:text;touch-action:auto;color-scheme:light}
+.paper.text{cursor:text}
 .ins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
 .ins-grid button{border:1px solid var(--line);border-radius:8px;padding:0;overflow:hidden;cursor:pointer;aspect-ratio:4/3;background:var(--surface-2)}
 .ins-grid button:hover{outline:2px solid var(--accent)}
@@ -194,6 +198,9 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .ts:hover{text-decoration:underline}
 .stext{font-size:14px;line-height:1.75;outline:none;border-radius:4px;overflow-wrap:anywhere}
 .stext:focus{background:var(--accent-soft)}
+.tr-text{margin:0;padding:10px 12px;font-size:14.5px;line-height:1.9;overflow-wrap:anywhere;white-space:pre-wrap}
+.tr-edit{display:block;width:100%;border:0!important;border-radius:0!important;background:transparent!important;padding:10px 12px!important;font-size:14.5px;line-height:1.9;resize:none;overflow:hidden;min-height:60px}
+.tr-edit:focus{background:var(--accent-soft)!important;outline:none}
 .interim{font-size:14px;color:var(--muted);font-style:italic;margin:0;padding:0 4px}
 
 .ph-add{display:flex;gap:8px;flex-wrap:wrap}
@@ -327,7 +334,8 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
               <button class="icon-btn tool" data-tool="pen" title="ペン" aria-pressed="true"></button>
               <button class="icon-btn tool" data-tool="marker" title="マーカー" aria-pressed="false"></button>
               <button class="icon-btn tool" data-tool="eraser" title="消しゴム（線ごと消去）" aria-pressed="false"></button>
-              <button class="icon-btn tool" data-tool="select" title="写真を選択・移動・拡大縮小" aria-pressed="false"></button>
+              <button class="icon-btn tool" data-tool="text" title="テキストボックス（紙面をタップして入力）" aria-pressed="false"></button>
+              <button class="icon-btn tool" data-tool="select" title="写真・テキストを選択／移動／大きさ変更" aria-pressed="false"></button>
               <button class="icon-btn" id="btnInsertImg" title="手書き欄に写真を挿入"></button>
             </div>
             <span class="tb-sep"></span>
@@ -352,7 +360,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
         </div>
 
         <div class="paper-shell">
-          <div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><button class="btn sm sel-del" id="selDel">写真を削除</button></div></div>
+          <div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea></div>
           <div class="paper-foot">
             <button class="btn sm" id="btnAddPage">＋ ページを追加</button>
           </div>
@@ -370,7 +378,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
           <div class="note" id="srNote" hidden></div>
           <div class="pane-actions" id="trActions" hidden>
             <button class="btn sm" id="btnCopyTr">全文をコピー</button>
-            <span class="small">時刻を押すとその位置から再生。本文はクリックで修正できます。</span>
+            <span class="small">文章はタップして直接修正できます。</span>
           </div>
           <div id="trList" style="display:grid;gap:12px"></div>
           <p class="interim" id="interim"></p>
@@ -454,8 +462,14 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
     </section>
     <section>
       <h3>録音</h3>
-      <label class="chk"><input type="checkbox" id="setLive">録音と同時に文字起こしする</label>
-      <p class="small">iPad などで録音中に動作が重くなる・録音が途中で止まる場合はオフにしてください。オフにすると録音だけを行います。</p>
+      <label>録音ボタンの動作<select id="setRecMode">
+        <option value="both">録音＋文字起こし</option>
+        <option value="text">文字起こしのみ（音声は録音しない）</option>
+        <option value="rec">録音のみ</option>
+      </select></label>
+      <p class="small">iPad で「録音＋文字起こし」だと文字起こしが止まる場合は、「文字起こしのみ」を試してください。iPad はマイクを録音と文字起こしで同時に使えないことがあります。</p>
+      <div class="pane-actions"><button type="button" class="btn" id="btnSRTest">文字起こしをテスト（10秒）</button></div>
+      <p class="small" id="srTestOut" aria-live="polite"></p>
     </section>
     <section>
       <h3>バックアップ</h3>
@@ -518,6 +532,7 @@ const ICONS = {
   eraser: '<path d="M9 20h11"/><path d="M4.5 15.5l9.5-9.5 5.5 5.5-8.5 8.5H9z"/><path d="M9 11l5.5 5.5"/>',
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/>',
+  text: '<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>',
   select: '<path d="M6 3.5l12 7-5.2 1.6L10.5 18z"/><path d="M13 12.5l4.5 6"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><path d="M21 15.5l-5-5-9 8.5"/>',
   hand: '<path d="M8 12.5V5.5a1.5 1.5 0 013 0V11m0-6.5a1.5 1.5 0 013 0V11m0-4.5a1.5 1.5 0 013 0V14a7 7 0 01-7 7h-.6a6 6 0 01-5-2.7l-2.3-3.6a1.6 1.6 0 012.6-1.8L8 15"/>'
@@ -668,6 +683,7 @@ $('#scrim').addEventListener('click', () => $('#app').classList.remove('nav-open
 function showWelcome() { S.cur = null; $('#workspace').hidden = true; $('#welcome').hidden = false; }
 function openMemo(id) {
   const m = S.memos.find(x => x.id === id); if (!m) return;
+  commitText();
   S.cur = m; lsSet('lastMemo', id);
   P.undo = []; P.redo = []; P.sel = null; P.drag = null;
   $('#welcome').hidden = true; $('#workspace').hidden = false;
@@ -761,7 +777,7 @@ function layoutPaper() {
   P.lastW = w; P.scale = w / LW; ensurePages();
   const dpr = Math.min(window.devicePixelRatio || 1, 2.5), h = PAGE_H * P.scale;
   for (const p of P.pages) { p.c.style.width = w + 'px'; p.c.style.height = h + 'px'; p.c.width = Math.round(w * dpr); p.c.height = Math.round(h * dpr); p.dpr = dpr; }
-  redrawAll(); renderPageBtns(); updateSelBox();
+  redrawAll(); renderPageBtns(); updateSelBox(); placeEditor();
 }
 new ResizeObserver(() => { if (S.cur && paperEl.clientWidth && paperEl.clientWidth !== P.lastW) layoutPaper(); }).observe(paperEl);
 
@@ -834,14 +850,42 @@ function drawImgItem(ctx, s) {
   ctx.strokeStyle = '#c3ccd6'; ctx.lineWidth = 1; ctx.strokeRect(s.x, s.y, s.w, s.h);
   ctx.restore();
 }
-function drawItems(ctx, list) { for (const s of list) if (s.t === 'img') drawImgItem(ctx, s); for (const s of list) if (s.t !== 'img') drawStroke(ctx, s); }
+/* テキストボックス：{t:'text', id, x, y, w, h, size, c, text}。幅で折り返して描く */
+const TEXT_PAD = 8, TEXT_SIZES = [22, 28, 38];
+const textFont = size => `500 ${size}px "Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif`;
+const measureCtx = document.createElement('canvas').getContext('2d');
+function wrapText(s) {
+  measureCtx.font = textFont(s.size); const maxW = s.w - TEXT_PAD * 2, lines = [];
+  for (const para of String(s.text).split('\n')) {
+    let line = '';
+    for (const ch of para) { if (line && measureCtx.measureText(line + ch).width > maxW) { lines.push(line); line = ch; } else line += ch; }
+    lines.push(line);
+  }
+  return lines;
+}
+function layoutTextItem(s) { s.h = Math.round(wrapText(s).length * s.size * 1.5 + TEXT_PAD * 2); s.b = bbox(s); return s; }
+function drawTextItem(ctx, s) {
+  if (s.id && s.id === P.editingId) return;
+  const lh = s.size * 1.5;
+  ctx.save(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.font = textFont(s.size); ctx.fillStyle = s.c; ctx.textBaseline = 'middle';
+  wrapText(s).forEach((l, i) => ctx.fillText(l, s.x + TEXT_PAD, s.y + TEXT_PAD + i * lh + lh / 2));
+  ctx.restore();
+}
+function drawItems(ctx, list) {
+  for (const s of list) if (s.t === 'img') drawImgItem(ctx, s);
+  for (const s of list) if (s.t === 'text') drawTextItem(ctx, s);
+  for (const s of list) if (s.t !== 'img' && s.t !== 'text') drawStroke(ctx, s);
+}
+const isBox = s => s.t === 'img' || s.t === 'text';
 function drawStroke(ctx, s) {
   if (s.t === 'img') { drawImgItem(ctx, s); return; }
+  if (s.t === 'text') { drawTextItem(ctx, s); return; }
   ctx.save(); styleFor(ctx, s);
   if (s.p.length === 1) dot(ctx, s); else { for (let i = 1; i < s.p.length; i++) seg(ctx, s, i); tail(ctx, s); }
   ctx.restore();
 }
-function bbox(s) { if (s.t === 'img') return [s.x, s.y, s.x + s.w, s.y + s.h]; let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const q of s.p) { if (q[0] < a) a = q[0]; if (q[1] < b) b = q[1]; if (q[0] > c) c = q[0]; if (q[1] > d) d = q[1]; } return [a, b, c, d]; }
+function bbox(s) { if (s.t === 'img' || s.t === 'text') return [s.x, s.y, s.x + s.w, s.y + s.h]; let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const q of s.p) { if (q[0] < a) a = q[0]; if (q[1] < b) b = q[1]; if (q[0] > c) c = q[0]; if (q[1] > d) d = q[1]; } return [a, b, c, d]; }
 function redrawPage(i) {
   const ctx = pageCtx(i); drawBg(ctx, i, S.cur.pages);
   drawItems(ctx, itemsOnPage(S.cur, i));
@@ -869,7 +913,7 @@ function distSeg(p, a, b) {
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 }
 function hitStroke(s, pt, r) {
-  if (s.t === 'img') return false;
+  if (isBox(s)) return false;
   const b = s.b || (s.b = bbox(s)), pad = r + s.w;
   if (pt[0] < b[0] - pad || pt[0] > b[2] + pad || pt[1] < b[1] - pad || pt[1] > b[3] + pad) return false;
   const lim = r + s.w / 2, p = s.p;
@@ -887,10 +931,13 @@ function eraseAt(pt) {
 }
 
 paperEl.addEventListener('pointerdown', e => {
-  if (!S.cur || e.target.closest('.page-del,.sel-del')) return;
+  if (!S.cur || e.target.closest('.page-del,.sel-del,.sel-edit,.tb-editor')) return;
+  // 入力中のテキストボックスは、紙面の別の場所に触れたら確定する（そのタップでは新しい箱を作らない）
+  const wasEditing = !!TE; if (TE) commitText();
   if (e.pointerType === 'pen' && !P.penSeen) { P.penSeen = true; if (!P.penOnly) { setPenOnly(true); toast('ペンを検出しました。指で触るとスクロールになります（手のひらボタンで切替）'); } }
   // ペンのみモードの指：iPad はブラウザ標準のスクロール（慣性つき）、その他は手動スクロール
   if (e.pointerType === 'touch' && P.penOnly && P.tool !== 'select') {
+    if (P.tool === 'text') P.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, skip: wasEditing };
     if (!NATIVE_PAN) { P.pan = { id: e.pointerId, y: e.clientY, v: 0, t: e.timeStamp }; paperEl.setPointerCapture(e.pointerId); }
     return;
   }
@@ -906,6 +953,7 @@ paperEl.addEventListener('pointerdown', e => {
   const pt = toPt(e);
   const tool = (e.pointerType === 'pen' && (e.button === 5 || (e.buttons & 32))) ? 'eraser' : P.tool;
   if (tool === 'select') { startSelect(e, pt); return; }
+  if (tool === 'text') { P.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, skip: wasEditing }; return; }
   if (tool === 'eraser') { P.erasing = { id: e.pointerId, type: e.pointerType, before: S.cur.strokes, changed: false }; eraseAt(pt); return; }
   const w = WIDTHS[P.wi][1];
   const s = { t: tool, c: tool === 'marker' ? P.hl : P.ink, w: tool === 'marker' ? w * 5 : w, p: [pt] };
@@ -935,6 +983,14 @@ paperEl.addEventListener('pointermove', e => {
   }
 });
 function endPointer(e) {
+  if (P.tap && e.pointerId === P.tap.id) {
+    // テキストツール：軽くタップして離したら、その位置に入力欄を開く（既存の箱なら編集）
+    const t = P.tap; P.tap = null;
+    if (e.type === 'pointerup' && !t.skip && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 12 && e.timeStamp - t.t < 800) {
+      P.rect = paperEl.getBoundingClientRect(); const pt = toPt(e), hit = boxAt(pt);
+      openTextEditor(hit && hit.t === 'text' ? hit : null, pt);
+    }
+  }
   if (P.pan && e.pointerId === P.pan.id) { flingScroll(P.pan.v); P.pan = null; return; }
   if (P.drag && e.pointerId === P.drag.id) {
     const moved = P.drag.moved; P.drag = null; P.rect = null;
@@ -970,7 +1026,7 @@ function flingScroll(v) {
 }
 // ペンのみモードで指のときだけ標準スクロールを許可（Apple Pencil は touchType が 'stylus'）
 for (const t of ['touchstart', 'touchmove']) paperEl.addEventListener(t, e => {
-  if (e.target.closest('button')) return;
+  if (e.target.closest('button, textarea')) return;
   const stylus = [...e.changedTouches].some(x => x.touchType === 'stylus');
   if (NATIVE_PAN && P.penOnly && !stylus && P.tool !== 'select' && !P.drawing && !P.erasing) return;
   e.preventDefault();
@@ -981,7 +1037,7 @@ function startSelect(e, pt) {
   const it = P.sel, k = 30 / P.scale; let mode;
   if (it && Math.abs(pt[0] - (it.x + it.w)) < k && Math.abs(pt[1] - (it.y + it.h)) < k) mode = 'resize';
   else {
-    const hit = [...S.cur.strokes].reverse().find(s => s.t === 'img' && pt[0] >= s.x && pt[0] <= s.x + s.w && pt[1] >= s.y && pt[1] <= s.y + s.h);
+    const hit = boxAt(pt);
     P.sel = hit || null; updateSelBox();
     if (!hit) return;
     mode = 'move';
@@ -998,6 +1054,7 @@ function dragMove(pt) {
   }
   const it = P.sel, old = it.b || bbox(it);
   if (d.mode === 'move') { it.x = Math.round(clamp(d.orig.x + dx, -it.w / 2, LW - it.w / 2)); it.y = Math.round(clamp(d.orig.y + dy, 0, m.pages * PAGE_H - it.h / 2)); }
+  else if (it.t === 'text') { it.w = Math.round(clamp(d.orig.w + dx, 120, LW)); layoutTextItem(it); }
   else { it.w = Math.round(clamp(d.orig.w + dx, 80, LW * 1.2)); it.h = Math.round(it.w * d.orig.h / d.orig.w); }
   it.b = bbox(it);
   redrawRange(Math.min(old[1], it.b[1]) - 4, Math.max(old[3], it.b[3]) + 4); updateSelBox();
@@ -1005,15 +1062,61 @@ function dragMove(pt) {
 function updateSelBox() {
   const box = $('#selBox'), it = P.sel;
   if (!it || P.tool !== 'select' || !S.cur || !S.cur.strokes.includes(it)) { box.hidden = true; return; }
-  const k = P.scale; box.hidden = false;
+  const k = P.scale; box.hidden = false; $('#selEdit').hidden = it.t !== 'text';
   Object.assign(box.style, { left: it.x * k + 'px', top: it.y * k + 'px', width: it.w * k + 'px', height: it.h * k + 'px' });
 }
+const boxAt = pt => [...S.cur.strokes].reverse().find(s => isBox(s) && pt[0] >= s.x && pt[0] <= s.x + s.w && pt[1] >= s.y && pt[1] <= s.y + s.h);
 function deleteSel() {
   const it = P.sel; if (!it) return;
   pushUndo(S.cur.strokes); S.cur.strokes = S.cur.strokes.filter(s => s !== it); P.sel = null;
   redrawRange(it.y - 4, it.y + it.h + 4); updateSelBox(); touch();
 }
 $('#selDel').addEventListener('click', e => armConfirm(e.currentTarget, 'もう一度で削除', deleteSel));
+$('#selEdit').addEventListener('click', () => { if (P.sel && P.sel.t === 'text') openTextEditor(P.sel); });
+
+/* テキストボックスの入力欄（紙面の上に重ねて表示し、確定したら紙面に描く） */
+const tbEd = $('#tbEditor'); let TE = null;
+function openTextEditor(item, pt) {
+  commitText();
+  if (item) TE = { item, x: item.x, y: item.y, w: item.w, size: item.size, c: item.c };
+  else {
+    const size = TEXT_SIZES[P.wi], w = 520;
+    TE = { item: null, x: Math.round(clamp(pt[0] - TEXT_PAD, 0, LW - 160)), y: Math.round(Math.max(0, pt[1] - size * 0.75 - TEXT_PAD)), w: 0, size, c: P.ink };
+    TE.w = Math.round(Math.max(160, Math.min(w, LW - TE.x - 10)));
+  }
+  P.editingId = item ? item.id : null;
+  if (item) redrawRange(item.y - 4, item.y + item.h + 4);
+  tbEd.value = item ? item.text : ''; tbEd.hidden = false; placeEditor();
+  try { tbEd.focus({ preventScroll: true }); } catch { tbEd.focus(); }
+}
+function placeEditor() {
+  if (!TE) return; const k = P.scale;
+  Object.assign(tbEd.style, { left: TE.x * k + 'px', top: TE.y * k + 'px', width: TE.w * k + 'px', fontSize: TE.size * k + 'px', color: TE.c, padding: (TEXT_PAD * k - 1.5) + 'px' });
+  tbEd.style.height = 'auto'; tbEd.style.height = Math.max(tbEd.scrollHeight, TE.size * 1.5 * k + TEXT_PAD * 2 * k) + 'px';
+}
+function commitText() {
+  if (!TE) return;
+  const t = TE, m = S.cur, text = tbEd.value.replace(/\s+$/, '');
+  TE = null; P.editingId = null; tbEd.hidden = true; tbEd.blur();
+  if (!m) return;
+  if (t.item) {
+    const old = t.item;
+    if (!text) { pushUndo(m.strokes); m.strokes = m.strokes.filter(s => s !== old); if (P.sel === old) P.sel = null; }
+    else if (text !== old.text) { const n = layoutTextItem({ ...old, text }); pushUndo(m.strokes); m.strokes = m.strokes.map(s => s === old ? n : s); if (P.sel === old) P.sel = n; redrawRange(n.y - 4, n.y + n.h + 4); }
+    redrawRange(old.y - 4, old.y + old.h + 4); updateSelBox();
+    if (text !== old.text) touch();
+  } else if (text) {
+    const n = layoutTextItem({ t: 'text', id: uid(), x: t.x, y: t.y, w: t.w, size: t.size, c: t.c, text });
+    pushUndo(m.strokes); m.strokes = [...m.strokes, n];
+    redrawRange(n.y - 4, n.y + n.h + 4);
+    if (n.y + n.h > m.pages * PAGE_H - 40) addPage();
+    touch();
+  }
+}
+tbEd.addEventListener('input', placeEditor);
+tbEd.addEventListener('blur', () => setTimeout(() => { if (TE && document.activeElement !== tbEd) commitText(); }, 0));
+tbEd.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitText(); } });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (S.cur) { for (const s of S.cur.strokes) if (s.t === 'text') layoutTextItem(s); redrawAll(); } });
 
 /* 写真の挿入 */
 function visibleTopY() {
@@ -1060,8 +1163,8 @@ for (const id of ['insCam', 'insFile']) $('#' + id).addEventListener('change', a
 const snap = () => ({ s: S.cur.strokes, n: S.cur.pages });
 function restore(st) { const pg = st.n !== S.cur.pages; S.cur.strokes = st.s; S.cur.pages = st.n; pg ? layoutPaper() : redrawAll(); if (P.sel && !st.s.includes(P.sel)) P.sel = null; updateSelBox(); touch(); updateUndoUI(); }
 function pushUndo(prev) { P.undo.push({ s: prev, n: S.cur.pages }); if (P.undo.length > 200) P.undo.shift(); P.redo = []; updateUndoUI(); }
-function undo() { if (!P.undo.length) return; P.redo.push(snap()); restore(P.undo.pop()); }
-function redo() { if (!P.redo.length) return; P.undo.push(snap()); restore(P.redo.pop()); }
+function undo() { commitText(); if (!P.undo.length) return; P.redo.push(snap()); restore(P.undo.pop()); }
+function redo() { commitText(); if (!P.redo.length) return; P.undo.push(snap()); restore(P.redo.pop()); }
 function updateUndoUI() { $('#btnUndo').disabled = !P.undo.length; $('#btnRedo').disabled = !P.redo.length; }
 function addPage() { S.cur.pages++; layoutPaper(); touch(); }
 
@@ -1075,15 +1178,19 @@ $('#btnPenOnly').addEventListener('click', () => { setPenOnly(!P.penOnly); toast
 const NATIVE_PAN = typeof Touch !== 'undefined' && 'touchType' in Touch.prototype;
 function setPenOnly(v) { P.penOnly = v; paperEl.classList.toggle('pen-only', v && NATIVE_PAN); lsSet('penOnly', v ? '1' : '0'); $('#btnPenOnly').setAttribute('aria-pressed', v); $('#btnPenOnly').classList.toggle('tool', true); }
 function setTool(t) {
+  commitText();
+  if (t === 'text' && P.tool !== 'text') toast('紙面をタップすると、その位置にテキストを入力できます');
   P.tool = t; $$('.tool[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
-  paperEl.classList.toggle('eraser', t === 'eraser'); paperEl.classList.toggle('select', t === 'select');
+  paperEl.classList.toggle('eraser', t === 'eraser'); paperEl.classList.toggle('select', t === 'select'); paperEl.classList.toggle('text', t === 'text');
   if (t !== 'select') P.sel = null;
   updateSelBox(); renderSwatches();
 }
 function renderSwatches() {
   const list = P.tool === 'marker' ? HL : INK, cur = P.tool === 'marker' ? P.hl : P.ink;
   $('#swatches').innerHTML = list.map(([c, n]) => `<button class="swatch" style="background:${c}" data-c="${c}" title="${n}" aria-label="${n}" aria-pressed="${c === cur}"></button>`).join('');
-  $('#widths').innerHTML = WIDTHS.map(([n, w], i) => `<button class="wbtn" data-wi="${i}" title="${n}" aria-label="太さ ${n}" aria-pressed="${i === P.wi}"><i style="height:${Math.max(2, w * (P.tool === 'marker' ? 1.6 : 1))}px"></i></button>`).join('');
+  $('#widths').innerHTML = P.tool === 'text'
+    ? ['小', '中', '大'].map((n, i) => `<button class="wbtn" data-wi="${i}" title="文字の大きさ ${n}" aria-label="文字の大きさ ${n}" aria-pressed="${i === P.wi}"><b style="font-size:${11 + i * 4}px;line-height:1">A</b></button>`).join('')
+    : WIDTHS.map(([n, w], i) => `<button class="wbtn" data-wi="${i}" title="${n}" aria-label="太さ ${n}" aria-pressed="${i === P.wi}"><i style="height:${Math.max(2, w * (P.tool === 'marker' ? 1.6 : 1))}px"></i></button>`).join('');
   const dis = P.tool === 'eraser' || P.tool === 'select'; $$('#swatches button,#widths button').forEach(b => b.disabled = dis);
   $('#swatches').style.opacity = $('#widths').style.opacity = dis ? .35 : 1;
 }
@@ -1109,7 +1216,7 @@ function deletePage(i) {
     const b = s.b || (s.b = bbox(s)), cy = (b[1] + b[3]) / 2;
     if (cy >= top && cy < bottom) return [];
     if (cy < top) return [s];
-    if (s.t === 'img') { const n = { ...s, y: s.y - PAGE_H }; n.b = bbox(n); return [n]; }
+    if (isBox(s)) { const n = { ...s, y: s.y - PAGE_H }; n.b = bbox(n); return [n]; }
     const p = s.p.map(q => [q[0], Math.round((q[1] - PAGE_H) * 10) / 10, q[2]]);
     const n = { ...s, p }; n.b = bbox(n); return [n];
   });
@@ -1125,75 +1232,112 @@ document.addEventListener('keydown', e => {
 
 /* ---------- recording + live transcription ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const R = { on: false, busy: false, sess: null, memo: null, id: null, stream: null, t0: 0, startedAt: 0, sr: null, srOff: false, srFails: 0, srDelay: 250, segStart: null, interim: '', timer: null, ac: null, raf: 0, wake: null };
+const R = { on: false, busy: false, sess: null, memo: null, id: null, stream: null, t0: 0, startedAt: 0, sr: null, srOff: false, srFails: 0, srDelay: 250, segStart: null, interim: '', flushing: false, srMsg: '', srSuggest: false, onSRStart: null, timer: null, ac: null, raf: 0, wake: null };
 const elapsed = () => (performance.now() - R.t0) / 1000;
-const srEnabled = () => !!SR && lsGet('liveTranscribe') !== '0';
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/* 録音モード：both=録音＋文字起こし / text=文字起こしのみ / rec=録音のみ */
+const recMode = () => { if (!SR) return 'rec'; const m = lsGet('recMode'); return m || (lsGet('liveTranscribe') === '0' ? 'rec' : 'both'); };
+const SR_ADVICE = {
+  'not-allowed': 'マイクの使用が許可されていません。iPad の「設定」→「アプリ」→「Safari」→「マイク」を「許可」にし、ページを開き直してください。',
+  'service-not-allowed': '音声認識が使えない状態です。iPad の「設定」→「一般」→「キーボード」→「音声入力」をオンにしてください。ホーム画面から起動している場合は、Safari で開くと動くことがあります。',
+  'audio-capture': '録音と文字起こしが同時にマイクを使えませんでした。',
+  'network': 'インターネットに接続できないため、文字起こしできません。通信状態を確認してください。',
+  'language-not-supported': '日本語の音声認識が使えません。iPad の「設定」→「一般」→「キーボード」で日本語キーボードを追加し、「音声入力」をオンにしてください。'
+};
 
 $('#btnRec').addEventListener('click', () => { if (R.busy) return; R.on ? stopRec() : startRec(); });
 async function startRec() {
-  if (!S.cur || R.on) return;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { toast('このブラウザでは録音できません。Safari / Chrome / Edge の最新版で開いてください'); return; }
-  let stream;
-  R.busy = true;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-  catch (err) { toast('マイクを使えませんでした。ブラウザの設定でこのページのマイクを「許可」にしてください'); return; }
-  finally { R.busy = false; }
-  const mt = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
-  let rec;
-  try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); }
-  catch { stream.getTracks().forEach(t => t.stop()); toast('録音を開始できませんでした'); return; }
-  const sess = { memo: S.cur, id: uid(), rec, stream, chunks: [], t0: performance.now(), startedAt: Date.now(), saved: false, dur: null, note: '' };
-  rec.ondataavailable = e => { if (e.data && e.data.size) sess.chunks.push(e.data); };
-  rec.onstop = () => finalizeRec(sess);
-  rec.onerror = () => { if (R.on && R.sess === sess) stopRec('録音中にエラーが起きたため、ここまでの音声を保存しました。'); };
-  stream.getAudioTracks().forEach(t => t.addEventListener('ended', () => { if (R.on && R.sess === sess) stopRec('マイクが使えなくなったため、ここまでの音声を保存しました。'); }));
-  rec.start(1000);
-  Object.assign(R, { on: true, sess, memo: sess.memo, id: sess.id, stream, t0: sess.t0, startedAt: sess.startedAt, srOff: false, srFails: 0, srDelay: 250, segStart: null, interim: '' });
+  if (!S.cur || R.on || R.busy) return;
+  const mode = recMode(), wantSR = mode !== 'rec', wantAudio = mode !== 'text';
+  if (wantAudio && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder)) {
+    if (!wantSR) { toast('このブラウザでは録音できません。Safari / Chrome / Edge の最新版で開いてください'); return; }
+  }
+  const sess = { memo: S.cur, id: uid(), rec: null, stream: null, chunks: [], t0: performance.now(), startedAt: Date.now(), saved: false, dur: null, note: '', textOnly: !wantAudio };
+  Object.assign(R, { on: true, busy: true, sess, memo: sess.memo, id: sess.id, stream: null, t0: sess.t0, startedAt: sess.startedAt, srOff: !wantSR, srFails: 0, srDelay: 250, segStart: null, interim: '', flushing: false, srMsg: '', srSuggest: false });
   // 画面の切り替えを先に済ませ、停止ボタンがすぐ使えるようにする
   updateRecUI(); renderTranscript();
   R.timer = setInterval(() => { $('#recTime').textContent = fmtTime(elapsed()); }, 500);
-  startMeter();
-  if (srEnabled()) startSR(); else $('#liveText').textContent = SR ? '録音のみ（文字起こしは設定でオフ）' : '録音中（このブラウザは文字起こし非対応）';
-  if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { if (R.on) R.wake = w; else w.release(); }).catch(() => {});
+  $('#liveText').textContent = wantSR ? '話し始めると、ここに文字が表示されます' : '録音のみ（文字起こしは設定でオフ）';
+  try {
+    // iPad では先に音声認識にマイクを渡してから録音を始めると、同時に動きやすい
+    if (wantSR) { await new Promise(res => { const t = setTimeout(res, 1500); R.onSRStart = () => { clearTimeout(t); res(); }; startSR(); }); R.onSRStart = null; }
+    if (!R.on || R.sess !== sess) return;
+    if (wantAudio && navigator.mediaDevices && window.MediaRecorder) {
+      let stream = null;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: IS_IOS ? true : { echoCancellation: true, noiseSuppression: true } }); }
+      catch {
+        if (wantSR && !R.srOff) { sess.textOnly = true; toast('マイクで録音できなかったため、文字起こしのみ行います', 6000); }
+        else { R.on = false; clearInterval(R.timer); updateRecUI(); toast('マイクを使えませんでした。ブラウザの設定でこのページのマイクを「許可」にしてください', 6000); return; }
+      }
+      if (stream && !(R.on && R.sess === sess)) { stream.getTracks().forEach(t => t.stop()); return; }
+      if (stream) {
+        const mt = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+        let rec = null;
+        try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); } catch {}
+        if (!rec) { stream.getTracks().forEach(t => t.stop()); sess.textOnly = true; toast('録音を開始できなかったため、文字起こしのみ行います', 6000); }
+        else {
+          sess.rec = rec; sess.stream = stream; R.stream = stream;
+          rec.ondataavailable = e => { if (e.data && e.data.size) sess.chunks.push(e.data); };
+          rec.onstop = () => finalizeRec(sess);
+          rec.onerror = () => { if (R.on && R.sess === sess) stopRec('録音中にエラーが起きたため、ここまでの音声を保存しました。'); };
+          stream.getAudioTracks().forEach(t => t.addEventListener('ended', () => { if (R.on && R.sess === sess) stopRec('マイクが使えなくなったため、ここまでの音声を保存しました。'); }));
+          rec.start(1000);
+          startMeter();
+        }
+      }
+    }
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { if (R.on) R.wake = w; else w.release(); }).catch(() => {});
+  } finally { R.busy = false; }
 }
 function startSR() {
   if (!SR || R.srOff || !R.on) return;
-  const sr = new SR(); sr.lang = 'ja-JP'; sr.continuous = true; sr.interimResults = true;
-  let began = performance.now(), got = false;
-  sr.onstart = () => { began = performance.now(); };
+  const sr = new SR(); sr.lang = 'ja-JP'; sr.continuous = true; sr.interimResults = true; sr.maxAlternatives = 1;
+  let began = performance.now(), got = false, done = 0, lastErr = '';
+  const ready = () => { if (R.onSRStart) { const f = R.onSRStart; R.onSRStart = null; f(); } };
+  sr.onstart = () => { began = performance.now(); ready(); };
   sr.onresult = e => {
     got = true; R.srFails = 0; R.srDelay = 250;
+    if (R.srMsg && !R.srSuggest) { R.srMsg = ''; if (S.cur === R.memo) srNote(); }
+    // 確定済みの結果の続きから読む（iPad は結果をまとめて送り直すことがあるため、二重登録を防ぐ）
     let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
+    for (let i = done; i < e.results.length; i++) {
       const r = e.results[i], txt = r[0].transcript;
       if (R.segStart == null) R.segStart = Math.max(0, elapsed() - 1.5);
-      if (r.isFinal) pushSeg(txt); else interim += txt;
+      if (r.isFinal && i === done) { pushSeg(txt); done = i + 1; } else interim += txt;
     }
     R.interim = interim; showInterim();
   };
   sr.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') disableSR('文字起こしが許可されていないため、録音のみ続けます。');
-    else if (e.error === 'audio-capture') disableSR('この端末では録音と同時に文字起こしできなかったため、録音のみ続けます。');
-    else if (e.error === 'network') R.srDelay = 4000;
+    lastErr = e.error; ready();
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'language-not-supported') disableSR(e.error);
+    else if (e.error === 'audio-capture') { if (R.sess && R.sess.rec) disableSR('audio-capture', true); else disableSR('audio-capture'); }
+    else if (e.error === 'network') { R.srDelay = 4000; R.srMsg = SR_ADVICE.network; if (S.cur === R.memo) srNote(); }
   };
   sr.onend = () => {
+    ready();
     if (R.interim) { pushSeg(R.interim); R.interim = ''; showInterim(); }
+    const flushed = R.flushing; R.flushing = false;
     if (!R.on || R.sr !== sr || R.srOff) return;
-    // すぐに終了を繰り返す端末では、再起動の連打で画面が重くならないよう間隔を空け、最後は止める
-    if (!got && performance.now() - began < 3000) R.srFails++;
-    if (R.srFails >= 5) { disableSR('文字起こしが何度も止まったため停止しました。録音は続いています。'); return; }
-    const wait = R.srFails ? Math.min(8000, 500 * 2 ** R.srFails) : R.srDelay;
+    // すぐに終了を繰り返す場合は、再起動の連打で画面が重くならないよう間隔を空け、最後は止める
+    if (!got && lastErr !== 'no-speech' && performance.now() - began < 1500) R.srFails++;
+    if (R.srFails >= 5) { disableSR(lastErr || 'repeat', !!(R.sess && R.sess.rec)); return; }
+    const wait = flushed ? 60 : R.srFails ? Math.min(8000, 500 * 2 ** R.srFails) : R.srDelay;
     setTimeout(() => { if (R.on && R.sr === sr && !R.srOff) startSR(); }, wait);
   };
   R.sr = sr;
-  try { sr.start(); } catch { R.srFails++; }
+  try { sr.start(); } catch { R.srFails++; ready(); }
 }
-function disableSR(msg) {
+/* 文字起こしを止め、原因と対処を文字起こし欄に表示する */
+function disableSR(code, suggestTextOnly) {
   if (R.srOff) return;
   R.srOff = true; const sr = R.sr; R.sr = null;
   try { sr && sr.abort(); } catch {}
-  $('#liveText').textContent = '録音のみ（文字起こし停止中）';
-  toast(msg, 6000);
+  R.srMsg = (SR_ADVICE[code] || '文字起こしが何度も止まってしまいました。') + (suggestTextOnly ? '「文字起こしのみ」に切り替えると、文字起こしできる場合があります。' : '');
+  R.srSuggest = !!suggestTextOnly;
+  $('#liveText').textContent = R.sess && R.sess.rec ? '録音のみ（文字起こし停止中）' : '文字起こし停止中';
+  if (S.cur === R.memo) { srNote(); showTab('tr'); }
+  toast(R.sess && R.sess.rec ? '文字起こしが止まりました（録音は続いています）。原因は「文字起こし」欄をご覧ください' : '文字起こしが止まりました。原因は「文字起こし」欄をご覧ください', 6000);
 }
 function pushSeg(txt) {
   const t = (txt || '').trim(); const at = R.segStart ?? Math.max(0, elapsed() - 2); R.segStart = null;
@@ -1220,7 +1364,7 @@ function stopRec(note) {
   try { sr && sr.stop(); } catch {}
   try { stopMeter(); } catch {}
   try { R.wake && R.wake.release(); } catch {} R.wake = null;
-  try { if (sess.rec.state !== 'inactive') sess.rec.stop(); else finalizeRec(sess); }
+  try { if (sess.rec && sess.rec.state !== 'inactive') sess.rec.stop(); else finalizeRec(sess); }
   catch { finalizeRec(sess); }
 }
 async function finalizeRec(sess) {
@@ -1228,14 +1372,21 @@ async function finalizeRec(sess) {
   // 端末側で録音が先に止まった場合：停止処理を通してから保存する
   if (R.on && R.sess === sess) { stopRec('録音が中断されたため、ここまでの音声を保存しました。'); return; }
   sess.saved = true;
-  try { sess.stream.getTracks().forEach(t => t.stop()); } catch {}
   const dur = sess.dur ?? (performance.now() - sess.t0) / 1000;
+  const m = sess.memo;
+  if (!sess.rec) {
+    // 文字起こしのみ：音声なしの記録として残す
+    if (!m.transcript.some(s => s.rec === sess.id)) { toast('文字起こしされた内容がありませんでした', 5000); if (S.cur === m) renderTranscript(); return; }
+    m.recordings.push({ id: sess.id, blob: null, textOnly: true, dur: Math.round(dur), startedAt: sess.startedAt });
+    markDirty(m); renderTree(); if (S.cur === m) renderTranscript();
+    toast(`${sess.note}文字起こしを保存しました（${fmtTime(dur)}）`); return;
+  }
+  try { sess.stream.getTracks().forEach(t => t.stop()); } catch {}
   if (!sess.chunks.length) { toast('録音データがありませんでした。マイクの許可を確認してください', 6000); return; }
   const blob = new Blob(sess.chunks, { type: sess.rec.mimeType || sess.chunks[0].type || 'audio/mp4' });
   const bid = uid();
   try { await db.put('blobs', { id: bid, blob }); }
   catch (e) { toast('録音の保存に失敗しました：' + (e && e.message || e), 6000); return; }
-  const m = sess.memo;
   m.recordings.push({ id: sess.id, blob: bid, mime: blob.type, dur: Math.round(dur), startedAt: sess.startedAt });
   markDirty(m); renderTree();
   if (S.cur === m) renderTranscript();
@@ -1255,7 +1406,7 @@ function updateRecUI() {
   const b = $('#btnRec');
   b.classList.toggle('on', R.on);
   const other = R.on && R.memo !== S.cur;
-  b.querySelector('.lbl').textContent = R.on ? (other ? '停止（別メモで録音中）' : '停止') : '録音開始';
+  b.querySelector('.lbl').textContent = R.on ? (other ? '停止（別メモで録音中）' : '停止') : (recMode() === 'text' ? '文字起こし開始' : '録音開始');
   $('#recMeta').hidden = !R.on; $('#liveLine').hidden = !R.on;
   if (!R.on) $('#recTime').textContent = '00:00';
 }
@@ -1273,11 +1424,21 @@ function renderPanel() { renderTranscript(); renderPhotos(); renderAI(); }
 
 /* transcript */
 function srNote() {
-  const n = $('#srNote');
-  if (!SR) { n.hidden = false; n.textContent = 'このブラウザは自動文字起こしに対応していません。録音のみ行います。Google Chrome または Microsoft Edge で開くと文字起こしできます。'; }
-  else if (!srEnabled()) { n.hidden = false; n.textContent = '録音と同時の文字起こしはオフになっています（「設定」で切り替えできます）。'; }
-  else { n.hidden = true; }
+  const n = $('#srNote'), parts = [];
+  if (!SR) parts.push('このブラウザは自動文字起こしに対応していません。録音のみ行います。iPad は Safari、パソコンは Chrome / Edge の最新版で開いてください。');
+  else if (recMode() === 'rec') parts.push('「録音のみ」モードです。文字起こしは「設定」でオンにできます。');
+  else if (recMode() === 'text') parts.push('「文字起こしのみ」モードです（音声は録音しません）。「設定」で切り替えできます。');
+  if (SR && IS_IOS && navigator.standalone && !R.srMsg && recMode() !== 'rec') parts.push('ホーム画面から起動したアプリでは、iPad の制限で文字起こしが動かないことがあります。うまくいかないときは「設定」の「文字起こしをテスト」で原因を確認できます。');
+  if (R.srMsg) parts.push(R.srMsg);
+  n.hidden = !parts.length;
+  n.innerHTML = parts.map(esc).join('<br>') + (R.srSuggest ? '<div style="margin-top:8px"><button class="btn sm" data-act="textonly">文字起こしのみに切り替える</button></div>' : '');
 }
+$('#srNote').addEventListener('click', e => {
+  if (!e.target.closest('[data-act=textonly]')) return;
+  lsSet('recMode', 'text'); R.srMsg = ''; R.srSuggest = false;
+  if (R.on) { stopRec(); setTimeout(startRec, 300); } else srNote();
+  toast('「文字起こしのみ」に切り替えました（録音した音声は保存済みです）', 5000);
+});
 function groupsFor(m) {
   const groups = m.recordings.map((r, i) => ({ r, n: i + 1, segs: [] }));
   const byId = new Map(groups.map(g => [g.r.id, g]));
@@ -1287,7 +1448,9 @@ function groupsFor(m) {
   for (const s of m.transcript) { const g = byId.get(s.rec); if (g) g.segs.push(s); else (other ||= { r: { id: 'other' }, n: 0, segs: [], other: true }).segs.push(s); }
   return [...groups, ...(liveG ? [liveG] : []), ...(other ? [other] : [])];
 }
-const segHTML = s => `<li data-sid="${s.id}"><button class="ts" data-t="${s.t}" title="この位置から再生">${fmtTime(s.t)}</button><span class="stext" contenteditable="true" spellcheck="false">${esc(s.text)}</span></li>`;
+/* 文字起こしは時刻で区切らず、録音ごとに一続きの文章として扱う */
+const joinSegs = segs => segs.map(s => s.text.trim()).filter(Boolean).join(' ');
+function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
 function renderTranscript() {
   const m = S.cur; srNote();
   const gs = groupsFor(m);
@@ -1300,16 +1463,18 @@ function renderTranscript() {
         ${g.live ? '<span class="live-tag">● 録音中</span>' : ''}
         ${!g.live && !g.other && g.r.blob ? `<button class="btn sm ghost danger" data-act="delrec">音声を削除</button>` : ''}
       </div>
-      ${!g.live && !g.other ? (g.r.blob ? `<audio controls preload="metadata" data-blob="${g.r.blob}"></audio>` : '<p class="small" style="padding:6px 12px">音声は削除済みです（文字起こしは残っています）</p>') : ''}
-      <ol class="segs">${g.segs.map(segHTML).join('') || `<li class="small" style="display:block">${g.live ? (SR ? '話し始めると、ここに文字起こしが表示されます。' : '録音中です。') : '文字起こしはありません'}</li>`}</ol>
+      ${!g.live && !g.other ? (g.r.blob ? `<audio controls preload="metadata" data-blob="${g.r.blob}"></audio>` : `<p class="small" style="padding:6px 12px">${g.r.textOnly ? '音声は録音していません（文字起こしのみ）' : '音声は削除済みです（文字起こしは残っています）'}</p>`) : ''}
+      ${g.live
+        ? `<p class="tr-text">${esc(joinSegs(g.segs)) || `<span class="small">${R.srOff ? '文字起こしは停止中です。' : '話し始めると、ここに文字起こしが表示されます。'}</span>`}</p>`
+        : `<textarea class="tr-edit" spellcheck="false" aria-label="文字起こし（編集できます）" placeholder="文字起こしはありません">${esc(joinSegs(g.segs))}</textarea>`}
     </div>`).join('') : '<div class="empty">ツールバーの「録音開始」を押すと、録音と同時に文字起こしが始まります。<br>録音データと文字起こしはこのメモに保存されます。</div>';
   $$('#trList audio[data-blob]').forEach(async a => { const u = await blobURL(a.dataset.blob); if (u) { a.src = u; fixDuration(a); } });
+  $$('#trList .tr-edit').forEach(autoGrow);
 }
 function appendLiveSeg(seg) {
-  const ol = $(`#trList .grp[data-rec="${seg.rec}"] .segs`);
-  if (!ol) { renderTranscript(); return; }
-  const ph = ol.querySelector('.small'); if (ph) ph.remove();
-  ol.insertAdjacentHTML('beforeend', segHTML(seg)); $('#trActions').hidden = false;
+  const p = $(`#trList .grp[data-rec="${seg.rec}"] .tr-text`);
+  if (!p) { renderTranscript(); return; }
+  p.textContent = joinSegs(R.memo.transcript.filter(s => s.rec === seg.rec)); $('#trActions').hidden = false;
   showInterim();
 }
 /* Chrome の webm は長さが不明になるため補正 */
@@ -1322,30 +1487,24 @@ function fixDuration(a) {
   }, { once: true });
 }
 $('#trList').addEventListener('click', e => {
-  const ts = e.target.closest('.ts');
-  if (ts) {
-    const a = ts.closest('.grp').querySelector('audio');
-    if (!a) { toast('この区間の音声はありません'); return; }
-    $$('#trList audio').forEach(x => x !== a && x.pause());
-    a.currentTime = Math.max(0, +ts.dataset.t - 0.5); a.play().catch(() => {}); return;
-  }
   const del = e.target.closest('[data-act=delrec]');
   if (del) armConfirm(del, 'もう一度押して削除', async () => {
     const r = S.cur.recordings.find(x => x.id === del.closest('.grp').dataset.rec); if (!r) return;
     await delBlob(r.blob); r.blob = null; touch(); renderTranscript(); toast('音声を削除しました（文字起こしは残しています）');
   });
 });
-$('#trList').addEventListener('focusout', e => {
-  const st = e.target.closest('.stext'); if (!st) return;
-  const id = st.closest('li').dataset.sid, m = S.cur, s = m.transcript.find(x => x.id === id); if (!s) return;
-  const t = st.textContent.trim();
-  if (t === s.text) return;
-  if (!t) { m.transcript = m.transcript.filter(x => x !== s); st.closest('li').remove(); } else s.text = t;
+/* 編集した文章は、その録音の文字起こし全体として1つにまとめて保存する */
+$('#trList').addEventListener('input', e => {
+  const ta = e.target.closest('.tr-edit'); if (!ta) return;
+  autoGrow(ta);
+  const rec = ta.closest('.grp').dataset.rec, m = S.cur, text = ta.value.trim();
+  const first = m.transcript.find(s => s.rec === rec);
+  m.transcript = m.transcript.filter(s => s.rec !== rec);
+  if (text) m.transcript.push({ id: first ? first.id : uid(), rec, t: 0, text });
   touch();
 });
-$('#trList').addEventListener('keydown', e => { if (e.target.closest('.stext') && e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
 function transcriptText(m) {
-  return groupsFor(m).filter(g => g.segs.length).map(g => g.segs.map(s => `[${g.other ? '' : '録音' + g.n + ' '}${fmtTime(s.t)}] ${s.text}`).join('\n')).join('\n\n');
+  return groupsFor(m).filter(g => g.segs.length).map(g => `【${g.other ? 'その他' : '録音' + g.n}】\n${joinSegs(g.segs)}`).join('\n\n');
 }
 $('#btnCopyTr').addEventListener('click', () => copyText(transcriptText(S.cur), '文字起こしをコピーしました'));
 async function copyText(t, msg) {
@@ -1443,6 +1602,7 @@ async function buildContent(m, o) {
   let head = `# 取材情報\n企業名: ${f.name}\n${f.note ? '企業メモ: ' + f.note + '\n' : ''}取材日: ${m.date || '(未記入)'}\n取材相手: ${m.person || '(未記入)'}\n場所: ${m.place || '(未記入)'}\nメモのタイトル: ${m.title}\n`;
   if (o.q && m.questions.length) head += `\n# 事前に用意した質問\n${m.questions.map((q, i) => `Q${i + 1}. ${q.text}${q.done ? '（質問済み）' : '（未質問の可能性あり）'}`).join('\n')}\n`;
   if (o.tr) { const t = transcriptText(m); if (t) head += `\n# 録音の文字起こし（ブラウザの音声認識による自動生成。誤認識・話者の区別なしを含む）\n${t}\n`; }
+  if (o.hw) { const tbs = m.strokes.filter(s => s.t === 'text' && s.text.trim()); if (tbs.length) head += `\n# メモに入力したテキスト\n${tbs.map(s => '- ' + s.text.replace(/\n/g, ' ')).join('\n')}\n`; }
   content.push({ type: 'text', text: head });
   let hwN = 0, phN = 0;
   if (o.hw) await Promise.all(m.strokes.filter(s => s.t === 'img').map(s => ensureImg(s.blob)));
@@ -1560,7 +1720,8 @@ async function streamClaude(key, content, signal, onText) {
 const dlgSet = $('#dlgSettings');
 $('#btnSettings').addEventListener('click', async () => {
   $('#setKey').value = lsGet('apiKey') || ''; $('#setModel').value = MODEL();
-  $('#setLive').checked = lsGet('liveTranscribe') !== '0'; $('#setLive').disabled = !SR;
+  $('#setRecMode').value = recMode(); $('#setRecMode').disabled = !SR; $('#btnSRTest').disabled = !SR;
+  $('#srTestOut').textContent = SR ? '' : 'このブラウザには音声認識の機能がありません。iPad は Safari、パソコンは Chrome / Edge で開いてください。';
   $('#storageInfo').textContent = '';
   try { const est = await navigator.storage.estimate(); $('#storageInfo').textContent = `使用量 ${(est.usage / 1048576).toFixed(1)} MB / 利用可能 ${(est.quota / 1073741824).toFixed(1)} GB`; } catch {}
   dlgSet.returnValue = ''; dlgSet.showModal();
@@ -1568,8 +1729,29 @@ $('#btnSettings').addEventListener('click', async () => {
 dlgSet.addEventListener('close', () => {
   if (dlgSet.returnValue !== 'ok') return;
   lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value);
-  lsSet('liveTranscribe', $('#setLive').checked ? '1' : '0');
-  renderAI(); if (S.cur) srNote(); toast('設定を保存しました');
+  if (SR) lsSet('recMode', $('#setRecMode').value);
+  renderAI(); if (S.cur) srNote(); updateRecUI(); toast('設定を保存しました');
+});
+/* 音声認識だけを10秒動かして、使えるかどうかと原因を表示する */
+$('#btnSRTest').addEventListener('click', () => {
+  const out = $('#srTestOut'), btn = $('#btnSRTest');
+  if (R.on) { out.textContent = '録音中はテストできません。録音を停止してからお試しください。'; return; }
+  let sr; try { sr = new SR(); } catch { out.textContent = '音声認識を起動できませんでした。'; return; }
+  sr.lang = 'ja-JP'; sr.continuous = true; sr.interimResults = true;
+  let text = '', err = '', started = false;
+  btn.disabled = true; out.textContent = '準備中…';
+  sr.onstart = () => { started = true; out.textContent = '聞き取り中です。何か話してください（10秒）…'; };
+  sr.onresult = e => { text = [...e.results].map(r => r[0].transcript).join(''); out.textContent = '聞き取り中：' + text; };
+  sr.onerror = e => { err = e.error; };
+  sr.onend = () => {
+    btn.disabled = false; clearTimeout(tm);
+    if (text) out.textContent = `✓ 文字起こしできました：「${text}」`;
+    else if (err && err !== 'no-speech' && err !== 'aborted') out.textContent = `✗ 文字起こしできませんでした（${err}）。` + (SR_ADVICE[err] || '');
+    else if (!started) out.textContent = '✗ 音声認識が起動しませんでした。' + SR_ADVICE['service-not-allowed'];
+    else out.textContent = '声が聞き取れませんでした。マイクに近づいて、もう一度お試しください。';
+  };
+  const tm = setTimeout(() => { try { sr.stop(); } catch {} }, 10000);
+  try { sr.start(); } catch (e) { btn.disabled = false; clearTimeout(tm); out.textContent = '音声認識を起動できませんでした：' + e.message; }
 });
 $('#btnExport').addEventListener('click', async e => {
   const b = e.currentTarget; b.disabled = true; b.textContent = '書き出し中…';
