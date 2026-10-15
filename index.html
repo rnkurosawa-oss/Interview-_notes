@@ -306,7 +306,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
     </div>
     <nav class="tree" id="tree"></nav>
     <div class="side-foot">
-      <div class="sync-row"><button class="btn sm" id="btnSync" title="Googleドライブと同期">⟳ 同期</button><span class="sync-state" id="syncState">未同期</span></div>
+      <div class="sync-row"><button class="btn sm" id="btnSync" title="クラウド（ログイン・同期の状態）">☁ クラウド</button><span class="sync-state" id="syncState">クラウド未設定</span></div>
       <button class="btn ghost block" id="btnSettings">設定・バックアップ</button>
     </div>
   </aside>
@@ -505,14 +505,13 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
       <p class="small" id="srTestOut" aria-live="polite"></p>
     </section>
     <section>
-      <h3>Googleドライブ同期</h3>
-      <label>GoogleのクライアントID<input id="setGClient" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
-      <p class="small">データはご自身のGoogleドライブの「アプリ専用の非表示領域」に保存されます。ほかの人やほかのアプリからは見えません。使う端末それぞれで、同じクライアントIDを入力してください。</p>
-      <p class="small mono" id="gInfo" style="user-select:text;-webkit-user-select:text;overflow-wrap:anywhere"></p>
-      <div class="pane-actions">
-        <button type="button" class="btn primary" id="btnSyncNow">保存して今すぐ同期</button>
-        <button type="button" class="btn ghost" id="btnGLogout">この端末の接続を解除</button>
+      <h3>クラウド同期（Firebase）</h3>
+      <p class="small" id="fbInfo"></p>
+      <div id="fbCfgBox">
+        <label>Firebase の設定値（firebaseConfig）<textarea id="setFbCfg" rows="5" spellcheck="false" placeholder='const firebaseConfig = {&#10;  apiKey: "…",&#10;  authDomain: "…",&#10;  projectId: "…", …&#10;};'></textarea></label>
+        <p class="small">Firebase コンソールに表示される設定値を、そのまま貼り付けてください。ここに貼った値はこの端末だけで使われます。index.html の先頭に書き込んでおけば、どの端末でもURLを開くだけで使えます。</p>
       </div>
+      <div class="pane-actions"><button type="button" class="btn" id="btnAccOpen">ログイン／アカウント</button></div>
     </section>
     <section>
       <h3>バックアップ</h3>
@@ -543,6 +542,33 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
     </section>
     <p class="small">挿入した写真は「写真を選択」ツールで、ドラッグして移動、右下の丸をドラッグして拡大・縮小できます。写真の上にもペンで書き込めます。</p>
     <div class="dlg-actions"><button value="cancel" class="btn">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgAccount">
+  <form method="dialog">
+    <h2>クラウド（Firebase）</h2>
+    <div id="accNoCfg" hidden>
+      <p class="small">クラウドの設定がまだです。Firebase の設定値を index.html に書き込むか、「設定・バックアップ」に貼り付けてください。</p>
+      <div class="dlg-actions"><button type="button" class="btn primary" id="accOpenSettings">設定を開く</button><button value="cancel" class="btn">閉じる</button></div>
+    </div>
+    <div id="accIn" hidden>
+      <p>ログイン中：<b id="accEmail"></b></p>
+      <p class="small">この端末のメモ・写真・録音は、クラウドと自動で同期されます。ほかの端末でも、同じURLを開いて同じアカウントでログインすれば同じデータを使えます。</p>
+      <div class="dlg-actions"><button type="button" class="btn ghost" id="accLogout">ログアウト</button><button value="cancel" class="btn primary">閉じる</button></div>
+    </div>
+    <div id="accOut" hidden style="display:grid;gap:12px">
+      <label>メールアドレス<input type="email" id="accMail" autocomplete="username" inputmode="email"></label>
+      <label>パスワード（6文字以上）<input type="password" id="accPw" autocomplete="current-password"></label>
+      <div class="pane-actions">
+        <button type="button" class="btn primary" id="accLogin">ログイン</button>
+        <button type="button" class="btn" id="accSignup">新規登録</button>
+        <button type="button" class="btn ghost" id="accReset">パスワードを忘れた</button>
+      </div>
+      <p class="small" id="accMsg" aria-live="polite"></p>
+      <p class="small">はじめて使うときは「新規登録」、2台目以降の端末では同じメールアドレスとパスワードで「ログイン」してください。</p>
+      <div class="dlg-actions"><button value="cancel" class="btn">閉じる</button></div>
+    </div>
   </form>
 </dialog>
 
@@ -579,6 +605,21 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
 
 <script>
 'use strict';
+/* ▼▼▼ Firebase の設定値 ▼▼▼
+   Firebase コンソール →「プロジェクトの設定」→「マイアプリ」に表示される firebaseConfig の中身を、
+   下の { } の中にそのまま貼り付けてください（例：apiKey: "AIza...", authDomain: "xxx.firebaseapp.com", ...）。
+   ここに書いておくと、どの端末でもURLを開いてログインするだけで同じデータを使えます。 */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBBiaY--pq9Kd4ZtgtEmf8OwAVj-rLkv-E",
+  authDomain: "interview-note-1a96c.firebaseapp.com",
+  databaseURL: "https://interview-note-1a96c-default-rtdb.firebaseio.com",
+  projectId: "interview-note-1a96c",
+  storageBucket: "interview-note-1a96c.firebasestorage.app",
+  messagingSenderId: "344734777577",
+  appId: "1:344734777577:web:d47602abffadb408a73078"
+};
+/* ▲▲▲ ここまで ▲▲▲ */
+
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -644,7 +685,7 @@ async function blobURL(id) {
   const r = await db.get('blobs', id); if (!r) return null;
   const u = URL.createObjectURL(r.blob); urlCache.set(id, u); return u;
 }
-async function delBlob(id) { if (!id) return; await db.del('blobs', id); const u = urlCache.get(id); if (u) { URL.revokeObjectURL(u); urlCache.delete(id); } }
+async function delBlob(id, keepRemote) { if (!id) return; await db.del('blobs', id); if (!keepRemote && FB.user) fbDeleteBlob(id); const u = urlCache.get(id); if (u) { URL.revokeObjectURL(u); urlCache.delete(id); } }
 
 /* ---------- state ---------- */
 const S = { folders: [], memos: [], cur: null, open: {}, query: '' };
@@ -666,7 +707,7 @@ async function persist(m) {
   // 書いている最中は保存を後回しにして、ペンの動きを止めない
   if (P.drawing || P.drag) { saveTimers.set(m.id, setTimeout(() => persist(m), 400)); return; }
   saveTimers.delete(m.id);
-  try { await db.put('memos', m); if (m === S.cur) $('#saveState').textContent = '保存済み'; }
+  try { await db.put('memos', m); if (m === S.cur) $('#saveState').textContent = '保存済み'; if (FB.user) fbSchedulePush(m); }
   catch (e) { toast('保存に失敗しました：' + (e && e.message || e)); }
 }
 function flushAll() { const ps = []; for (const [id, t] of saveTimers) { clearTimeout(t); const m = S.memos.find(x => x.id === id); if (m) ps.push(persist(m)); } return Promise.all(ps); }
@@ -709,7 +750,7 @@ tree.addEventListener('click', e => {
 $('#search').addEventListener('input', e => { S.query = e.target.value; renderTree(); });
 
 async function createMemo(fid) {
-  const m = newMemo(fid); S.memos.push(m); await db.put('memos', m); S.open[fid] = true;
+  const m = newMemo(fid); S.memos.push(m); await db.put('memos', m); S.open[fid] = true; if (FB.user) fbSchedulePush(m, 1500);
   openMemo(m.id); const t = $('#memoTitle'); t.focus(); t.select();
 }
 
@@ -726,10 +767,10 @@ function openFolderDlg(fid) {
 dlgFolder.addEventListener('close', async () => {
   if (dlgFolder.returnValue !== 'ok') return;
   const name = $('#fName').value.trim(); if (!name) return;
-  if (editingFolder) { editingFolder.name = name; editingFolder.note = $('#fNote').value.trim(); editingFolder.updatedAt = Date.now(); await db.put('folders', editingFolder); renderTree(); if (S.cur) fillHead(); }
+  if (editingFolder) { editingFolder.name = name; editingFolder.note = $('#fNote').value.trim(); editingFolder.updatedAt = Date.now(); await db.put('folders', editingFolder); fbPushFolder(editingFolder); renderTree(); if (S.cur) fillHead(); }
   else {
     const f = { id: uid(), name, note: $('#fNote').value.trim(), createdAt: Date.now(), updatedAt: Date.now() };
-    S.folders.push(f); await db.put('folders', f); await createMemo(f.id); toast(`「${name}」を追加し、取材メモを作成しました`);
+    S.folders.push(f); await db.put('folders', f); fbPushFolder(f); await createMemo(f.id); toast(`「${name}」を追加し、取材メモを作成しました`);
   }
 });
 $('#fDelete').addEventListener('click', e => {
@@ -738,7 +779,7 @@ $('#fDelete').addEventListener('click', e => {
   if (R.on && ms.includes(R.memo)) { toast('録音中のメモがあるため削除できません'); return; }
   armConfirm(e.currentTarget, ms.length ? `メモ${ms.length}件も削除します。もう一度押して確定` : 'もう一度押して削除', async () => {
     for (const m of ms) await removeMemo(m, true);
-    S.folders = S.folders.filter(x => x !== f); await db.del('folders', f.id); addTomb('folders', f.id);
+    S.folders = S.folders.filter(x => x !== f); await db.del('folders', f.id); addTomb('folders', f.id); fbPushFolderTomb(f.id);
     dlgFolder.close('deleted'); if (!S.cur) showWelcome(); renderTree(); toast(`「${f.name}」を削除しました`);
   });
 });
@@ -779,12 +820,13 @@ $('#btnDelMemo').addEventListener('click', e => {
     next ? openMemo(next.id) : (showWelcome(), renderTree()); toast('メモを削除しました');
   });
 });
-async function removeMemo(m, silent) {
+async function removeMemo(m, silent, fromRemote) {
   clearTimeout(saveTimers.get(m.id)); saveTimers.delete(m.id);
-  for (const r of m.recordings) { await delBlob(r.blob); for (const k of await db.keysPrefix('pcm', r.id + '-')) await db.del('pcm', k); }
-  for (const p of m.photos) await delBlob(p.blob);
-  for (const id of new Set([...(m.paperBlobs || []), ...m.strokes.filter(s => s.t === 'img').map(s => s.blob)])) await delBlob(id);
+  for (const r of m.recordings) { await delBlob(r.blob, fromRemote); for (const k of await db.keysPrefix('pcm', r.id + '-')) await db.del('pcm', k); }
+  for (const p of m.photos) await delBlob(p.blob, fromRemote);
+  for (const id of new Set([...(m.paperBlobs || []), ...m.strokes.filter(s => s.t === 'img').map(s => s.blob)])) await delBlob(id, fromRemote);
   await db.del('memos', m.id); S.memos = S.memos.filter(x => x !== m); addTomb('memos', m.id);
+  if (!fromRemote) fbPushMemoTomb(m.id);
   if (S.cur === m) S.cur = null;
   if (!silent) renderTree();
 }
@@ -1687,7 +1729,7 @@ function asrStatus() {
 }
 
 window.addEventListener('beforeunload', e => { flushAll(); if (R.on) { e.preventDefault(); e.returnValue = ''; } });
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushAll(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { flushAll().then(() => { if (FB.user) fbFlushPushes(); }); } });
 
 /* ---------- panel ---------- */
 function showTab(t) {
@@ -2129,159 +2171,312 @@ async function streamClaude(key, content, signal, onText) {
   return text;
 }
 
-/* ---------- Google ドライブ同期 ----------
-   ログインはGoogleの画面へ移動して戻る方式（iPad のホーム画面アプリでも動くように）。
-   データはドライブの appDataFolder（アプリ専用の非表示領域）に保存：
-   state.json＝フォルダ・メモ・削除記録 ／ 録音・写真は1件ずつ別ファイル（kind=blob） */
-const G_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-const DRIVE = 'https://www.googleapis.com/drive/v3/files', UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
-const G = { busy: false };
-const gClientId = () => (lsGet('gClientId') || '').trim();
-const gRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/, '');
-function gToken() { try { const t = JSON.parse(lsGet('gTok') || 'null'); return t && t.exp > Date.now() + 60000 ? t.token : null; } catch { return null; } }
-function parseAuthHash() {
-  if (!location.hash || !/(access_token|error)=/.test(location.hash)) return null;
-  const p = new URLSearchParams(location.hash.slice(1));
-  history.replaceState(null, '', location.pathname + location.search);
-  if (p.get('error')) return { error: p.get('error') };
-  lsSet('gTok', JSON.stringify({ token: p.get('access_token'), exp: Date.now() + (+p.get('expires_in') || 3600) * 1000 }));
-  return { ok: true };
+/* ---------- クラウド同期（Firebase） ----------
+   アプリ本体は GitHub Pages、データは Firebase（Firestore）に保存する。
+   どの端末でも同じURLを開いて同じアカウントでログインすれば、同じデータを使える。
+   ・メモは JSON を約900KBずつに分けて保存（Firestore の1件あたりの上限対策）
+   ・写真・録音も約900KBずつに分けて保存（無料プランのまま使えるよう Storage は使わない）
+   ・メモ・フォルダごとに更新日時を比べ、新しい方を残す。ほかの端末の変更はすぐに届く */
+const FB_VER = '12.19.0', FB_CHUNK = 900 * 1024;
+const FB = { F: null, app: null, auth: null, db: null, user: null, unsub: [], q: Promise.resolve(), pushT: new Map(), remote: new Map(), remoteF: new Map(), deferred: new Set(), initial: { memos: false, folders: false }, pushLocal: true, busyN: 0, prog: '', lastInput: 0 };
+FB.loadMods = async () => {
+  const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+  const [a, b, c] = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-firestore.js')]);
+  return { ...a, ...b, ...c };
+};
+function fbConfig() {
+  if (FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey) return FIREBASE_CONFIG;
+  try { const c = JSON.parse(lsGet('fbConfig') || 'null'); if (c && c.apiKey && c.projectId) return c; } catch {}
+  return null;
 }
-async function gAuthRedirect() {
-  if (location.protocol !== 'https:') { toast('同期は GitHub Pages など https:// のアドレスで開いたときに使えます', 6000); return; }
-  if (!gClientId()) { toast('先に「設定・バックアップ」で Google のクライアントIDを入力してください', 6000); $('#btnSettings').click(); return; }
-  commitText(); await flushAll();
-  lsSet('pendingSync', '1');
-  const q = new URLSearchParams({ client_id: gClientId(), redirect_uri: gRedirectUri(), response_type: 'token', scope: G_SCOPE, include_granted_scopes: 'true', state: 'sync' });
-  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + q;
+/* Firebase コンソールの表示（const firebaseConfig = {...}）をそのまま貼り付けても読めるようにする */
+function parseFbConfig(text) {
+  const m = String(text || '').match(/\{[\s\S]*\}/); if (!m) return null;
+  const s = m[0].replace(/\/\/[^\n]*/g, '').replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":').replace(/'/g, '"').replace(/,\s*}/g, '}');
+  try { const c = JSON.parse(s); return c.apiKey && c.projectId ? c : null; } catch { return null; }
 }
-async function gFetch(url, opt = {}) {
-  const tok = gToken(); if (!tok) throw Object.assign(new Error('auth'), { auth: true });
-  const res = await fetch(url, { ...opt, headers: { ...(opt.headers || {}), Authorization: 'Bearer ' + tok } });
-  if (res.status === 401) { lsSet('gTok', null); throw Object.assign(new Error('auth'), { auth: true }); }
-  if (!res.ok) {
-    let msg = res.statusText; try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch {}
-    if (res.status === 403 && /has not been used|is disabled/i.test(msg)) msg = 'Google Drive API が有効になっていません。Google Cloud の「APIとサービス」で有効にしてください';
-    throw new Error(`Googleドライブ（${res.status}）：${msg}`);
+async function fbInit() {
+  const cfg = fbConfig(); if (!cfg || FB.app) return;
+  setCloudUI('接続中…');
+  const F = FB.F = await FB.loadMods();
+  FB.app = F.initializeApp(cfg);
+  FB.auth = F.getAuth(FB.app);
+  try { await F.setPersistence(FB.auth, F.indexedDBLocalPersistence); } catch {}
+  FB.db = F.initializeFirestore(FB.app, { experimentalAutoDetectLongPolling: true });
+  F.onAuthStateChanged(FB.auth, u => {
+    FB.user = u; fbStop();
+    if (u) {
+      // 別のアカウントでログインした端末では、この端末の既存データを勝手に送らない
+      const owner = lsGet('fbOwner'); FB.pushLocal = !owner || owner === u.uid; lsSet('fbOwner', u.uid);
+      fbStart();
+    }
+    setCloudUI(); renderAccount();
+  });
+}
+const stampOf = x => x ? (x.updatedAt || x.createdAt || 0) : 0;
+const fbDoc = (...p) => FB.F.doc(FB.db, 'users', FB.user.uid, ...p);
+const fbCol = (...p) => FB.F.collection(FB.db, 'users', FB.user.uid, ...p);
+function fbQueue(fn) { const p = FB.q.then(fn).catch(fbError); FB.q = p; return p; }
+async function fbTask(fn) { FB.busyN++; setCloudUI(); try { return await fn(); } finally { FB.busyN--; FB.prog = ''; setCloudUI(); } }
+function fbError(e) {
+  console.error(e);
+  const code = (e && e.code) || '';
+  if (code === 'permission-denied') { setCloudUI('権限エラー', true); toast('クラウドに保存できません。Firebase のセキュリティルールを確認してください', 7000); }
+  else if (code === 'resource-exhausted') { setCloudUI('容量・回数の上限', true); toast('Firebase の無料枠の上限に達しました。しばらく待つか、プランを確認してください', 7000); }
+  else if (code === 'unavailable') setCloudUI('オフライン', true);
+  else setCloudUI('同期エラー', true);
+}
+function setCloudUI(text, err) {
+  const el = $('#syncState'); if (!el) return;
+  el.classList.toggle('err', !!err);
+  if (text) el.textContent = text;
+  else if (!fbConfig()) el.textContent = 'クラウド未設定';
+  else if (!FB.user) el.textContent = FB.app ? '未ログイン' : '接続中…';
+  else el.textContent = FB.busyN ? (FB.prog || '同期中…') : (navigator.onLine === false ? 'オフライン（あとで同期）' : '同期済み');
+  el.title = (FB.user ? FB.user.email + ' ・ ' : '') + el.textContent;
+}
+window.addEventListener('online', () => setCloudUI());
+window.addEventListener('offline', () => setCloudUI());
+
+function fbStart() {
+  const F = FB.F; FB.remote.clear(); FB.remoteF.clear(); FB.initial = { memos: false, folders: false };
+  FB.unsub.push(F.onSnapshot(fbCol('folders'), snap => fbQueue(() => fbOnFolders(snap)), fbError));
+  FB.unsub.push(F.onSnapshot(fbCol('memos'), snap => fbQueue(() => fbOnMemos(snap)), fbError));
+}
+function fbStop() { for (const u of FB.unsub) { try { u(); } catch {} } FB.unsub = []; }
+
+/* ---- フォルダ ---- */
+async function fbOnFolders(snap) {
+  for (const ch of snap.docChanges()) {
+    if (ch.type === 'removed') continue;
+    const id = ch.doc.id, r = ch.doc.data(); FB.remoteF.set(id, r);
+    const l = S.folders.find(f => f.id === id), tomb = tombs().folders[id] || 0;
+    if (r.deleted) {
+      if (l && stampOf(l) <= r.updatedAt) { S.folders = S.folders.filter(f => f !== l); await db.del('folders', id); addTomb('folders', id); renderTree(); }
+      continue;
+    }
+    if (tomb >= r.updatedAt) continue;
+    if (!l || r.updatedAt > stampOf(l)) {
+      const f = { id, name: r.name, note: r.note || '', createdAt: r.createdAt || r.updatedAt, updatedAt: r.updatedAt };
+      if (l) Object.assign(l, f); else S.folders.push(f);
+      await db.put('folders', l || f); renderTree(); if (S.cur) fillHead();
+    } else if (stampOf(l) > r.updatedAt) fbPushFolder(l);
   }
-  return res;
-}
-async function gList(q, fields = 'id,name,appProperties,modifiedTime') {
-  const out = []; let page = '';
-  do {
-    const p = new URLSearchParams({ spaces: 'appDataFolder', q, fields: `nextPageToken,files(${fields})`, pageSize: '1000' }); if (page) p.set('pageToken', page);
-    const j = await (await gFetch(DRIVE + '?' + p)).json(); out.push(...(j.files || [])); page = j.nextPageToken;
-  } while (page);
-  return out;
-}
-async function gUpload(name, blob, type, kind, fileId) {
-  type = type || 'application/octet-stream';
-  if (fileId) return (await gFetch(`${UPLOAD}/${fileId}?uploadType=media&fields=id`, { method: 'PATCH', headers: { 'Content-Type': type }, body: blob })).json();
-  const meta = { name, parents: ['appDataFolder'], appProperties: { kind, type } };
-  if (blob.size < 4.5 * 1048576) {
-    const b = 'xx' + uid();
-    const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${type}\r\n\r\n`, blob, `\r\n--${b}--`]);
-    return (await gFetch(`${UPLOAD}?uploadType=multipart&fields=id`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${b}` }, body })).json();
+  if (!FB.initial.folders) {
+    FB.initial.folders = true;
+    if (FB.pushLocal) for (const f of S.folders) if (!FB.remoteF.has(f.id)) fbPushFolder(f);
+    for (const [id, ts] of Object.entries(tombs().folders)) { const r = FB.remoteF.get(id); if (r && !r.deleted && r.updatedAt <= ts) fbPushFolderTomb(id, ts); }
+    if (!S.cur && S.memos.length) openMemo(S.memos[0].id);
   }
-  // 大きな録音は分割せずに「再開可能アップロード」で送る
-  const init = await gFetch(`${UPLOAD}?uploadType=resumable&fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': type }, body: JSON.stringify(meta) });
-  const loc = init.headers.get('Location'); if (!loc) throw new Error('大きなファイルのアップロードを開始できませんでした');
-  const res = await fetch(loc, { method: 'PUT', headers: { 'Content-Type': type }, body: blob });
-  if (!res.ok) throw new Error(`録音ファイルのアップロードに失敗しました（${res.status}）`);
-  return res.json();
 }
-function setSyncUI(text, err) {
-  const el = $('#syncState'); el.classList.toggle('err', !!err);
-  const last = +lsGet('lastSync');
-  el.textContent = text || (last ? '最終同期 ' + fmtClock(last) : '未同期'); el.title = el.textContent;
+function fbPushFolder(f) {
+  if (!FB.user) return;
+  fbQueue(async () => { await FB.F.setDoc(fbDoc('folders', f.id), { name: f.name, note: f.note || '', createdAt: f.createdAt || 0, updatedAt: stampOf(f), deleted: false }); FB.remoteF.set(f.id, { updatedAt: stampOf(f) }); });
 }
-async function syncNow(silent) {
-  if (G.busy) return;
-  if (R.on) { if (!silent) toast('録音中は同期できません。停止してから同期してください'); return; }
-  if (!gToken()) { if (!silent) gAuthRedirect(); return; }
-  G.busy = true; $('#btnSync').disabled = true; setSyncUI('同期中…');
-  const prevCur = S.cur, prevCurId = S.cur && S.cur.id;
+function fbPushFolderTomb(id, ts = Date.now()) {
+  if (!FB.user) return;
+  fbQueue(async () => { await FB.F.setDoc(fbDoc('folders', id), { deleted: true, updatedAt: ts }); FB.remoteF.set(id, { deleted: true, updatedAt: ts }); });
+}
+
+/* ---- メモ ---- */
+async function fbOnMemos(snap) {
+  for (const ch of snap.docChanges()) {
+    if (ch.type === 'removed') continue;
+    const id = ch.doc.id, r = ch.doc.data(); FB.remote.set(id, r);
+    await fbApplyRemoteMemo(id, r);
+  }
+  if (!FB.initial.memos) {
+    FB.initial.memos = true;
+    if (FB.pushLocal) for (const m of S.memos) if (!FB.remote.has(m.id)) fbSchedulePush(m, 0);
+    for (const [id, ts] of Object.entries(tombs().memos)) { const r = FB.remote.get(id); if (r && !r.deleted && r.updatedAt <= ts) fbPushMemoTomb(id, ts); }
+    for (const m of S.memos) fbQueue(() => fbBlobsDown(m));
+    if (!FB.pushLocal && S.memos.some(m => !FB.remote.has(m.id))) toast('この端末にある、別アカウントのときのメモはクラウドに送っていません', 6000);
+    if (!S.cur && S.memos.length) openMemo(S.memos[0].id);
+  }
+}
+/* 録音中・文字起こし中・書いている最中のメモは、終わってから反映する */
+function isMemoBusy(m) {
+  if (R.on && R.memo === m) return true;
+  if (ASR.cur && m.recordings.includes(ASR.cur)) return true;
+  if (S.cur !== m) return false;
+  return !!(P.drawing || P.erasing || P.drag || TE || saveTimers.has(m.id) || Date.now() - FB.lastInput < 3000);
+}
+/* 入力欄にカーソルが残っているだけなら同期を止めない（最後の入力から3秒以内だけ待つ） */
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#workspace')) FB.lastInput = Date.now(); }, true);
+async function fbApplyRemoteMemo(id, r) {
+  const l = S.memos.find(m => m.id === id), tomb = tombs().memos[id] || 0;
+  if (r.deleted) {
+    if (!l || stampOf(l) > r.updatedAt) return;
+    if (isMemoBusy(l)) { FB.deferred.add(id); return; }
+    const wasCur = S.cur === l; await removeMemo(l, true, true); renderTree();
+    if (wasCur) { const n = S.memos[0]; n ? openMemo(n.id) : showWelcome(); }
+    return;
+  }
+  if (tomb >= r.updatedAt) return;
+  if (l && stampOf(l) > r.updatedAt) { fbSchedulePush(l, 0); return; }
+  if (l && stampOf(l) === r.updatedAt) return;
+  if (l && isMemoBusy(l)) { FB.deferred.add(id); return; }
+  const m = await fbTask(() => fbPullMemo(id, r)); if (!m) return;
+  const l2 = S.memos.find(x => x.id === id);
+  if (l2 && stampOf(l2) >= stampOf(m)) return;
+  if (l2 && isMemoBusy(l2)) { FB.deferred.add(id); return; }
+  await db.put('memos', m);
+  S.memos = l2 ? S.memos.map(x => x === l2 ? m : x) : [...S.memos, m];
+  renderTree();
+  if (l2 && S.cur === l2) { const st = mainEl.scrollTop; openMemo(m.id); mainEl.scrollTop = st; }
+  fbQueue(() => fbBlobsDown(m));
+}
+setInterval(() => {
+  for (const id of [...FB.deferred]) {
+    const r = FB.remote.get(id), l = S.memos.find(m => m.id === id);
+    if (!r) { FB.deferred.delete(id); continue; }
+    if (!l || !isMemoBusy(l)) { FB.deferred.delete(id); fbQueue(() => fbApplyRemoteMemo(id, r)); }
+  }
+}, 4000);
+async function fbPullMemo(id, r) {
+  for (let t = 0; t < 6; t++) {
+    const snap = await FB.F.getDocs(fbCol('memos', id, 'parts'));
+    const parts = snap.docs.map(d => d.data()).filter(p => p.rev === r.rev).sort((a, b) => a.i - b.i);
+    if (parts.length === r.n) {
+      const arrs = parts.map(p => p.d.toUint8Array()), buf = new Uint8Array(arrs.reduce((a, x) => a + x.length, 0));
+      let o = 0; for (const x of arrs) { buf.set(x, o); o += x.length; }
+      return normalize(JSON.parse(new TextDecoder().decode(buf)));
+    }
+    const cur = FB.remote.get(id); if (cur && cur.rev !== r.rev) return null; // さらに新しい版が届いている
+    await sleepMs(1500);
+  }
+  return null;
+}
+function fbSchedulePush(m, delay = 4000) {
+  if (!FB.user) return;
+  clearTimeout(FB.pushT.get(m.id));
+  FB.pushT.set(m.id, setTimeout(() => { FB.pushT.delete(m.id); fbQueue(() => fbPushMemo(m)); }, delay));
+}
+function fbFlushPushes() { for (const [id, t] of FB.pushT) { clearTimeout(t); FB.pushT.delete(id); const m = S.memos.find(x => x.id === id); if (m) fbQueue(() => fbPushMemo(m)); } }
+async function fbPushMemo(m) {
+  if (!FB.user || !S.memos.includes(m)) return;
+  if (P.drawing || P.drag) { fbSchedulePush(m, 1500); return; }
+  const r = FB.remote.get(m.id); if (r && !r.deleted && r.updatedAt >= stampOf(m)) return;
+  await fbTask(async () => {
+    const F = FB.F;
+    await fbBlobsUp(m);
+    const stamp = stampOf(m), bytes = new TextEncoder().encode(JSON.stringify(m));
+    const n = Math.max(1, Math.ceil(bytes.length / FB_CHUNK)), rev = uid();
+    let batch = F.writeBatch(FB.db), size = 0;
+    for (let i = 0; i < n; i++) {
+      const part = bytes.slice(i * FB_CHUNK, (i + 1) * FB_CHUNK);
+      batch.set(fbDoc('memos', m.id, 'parts', String(i)), { rev, i, d: F.Bytes.fromUint8Array(part) });
+      size += part.length;
+      if (size > 7e6) { await batch.commit(); batch = F.writeBatch(FB.db); size = 0; }
+    }
+    batch.set(fbDoc('memos', m.id), { rev, n, updatedAt: stamp, title: m.title || '', folderId: m.folderId, deleted: false });
+    await batch.commit();
+    FB.remote.set(m.id, { rev, n, updatedAt: stamp, deleted: false });
+    // 前の版の残りを消す
+    const old = await F.getDocs(fbCol('memos', m.id, 'parts'));
+    for (const d of old.docs) if (d.data().rev !== rev) await F.deleteDoc(d.ref);
+  });
+}
+function fbPushMemoTomb(id, ts = Date.now()) {
+  if (!FB.user) return;
+  clearTimeout(FB.pushT.get(id)); FB.pushT.delete(id);
+  fbQueue(() => fbTask(async () => {
+    const F = FB.F;
+    await F.setDoc(fbDoc('memos', id), { deleted: true, updatedAt: ts, rev: '', n: 0 });
+    FB.remote.set(id, { deleted: true, updatedAt: ts });
+    const parts = await F.getDocs(fbCol('memos', id, 'parts'));
+    for (const d of parts.docs) await F.deleteDoc(d.ref);
+  }));
+}
+
+/* ---- 写真・録音 ---- */
+const blobIdsOf = m => { const s = new Set(); for (const r of m.recordings) if (r.blob) s.add(r.blob); for (const p of m.photos) if (p.blob) s.add(p.blob); for (const x of m.strokes) if (x.t === 'img' && x.blob) s.add(x.blob); return [...s]; };
+function upSet() { try { return new Set(JSON.parse(lsGet('fbUp:' + FB.user.uid) || '[]')); } catch { return new Set(); } }
+function upMark(id, on = true) { const s = upSet(); on ? s.add(id) : s.delete(id); lsSet('fbUp:' + FB.user.uid, JSON.stringify([...s])); }
+async function fbBlobsUp(m) {
+  const F = FB.F, done = upSet();
+  for (const id of blobIdsOf(m)) {
+    if (done.has(id)) continue;
+    const meta = await F.getDoc(fbDoc('blobs', id));
+    if (meta.exists() && meta.data().done) { upMark(id); continue; }
+    const row = await db.get('blobs', id); if (!row) continue;
+    const bytes = new Uint8Array(await row.blob.arrayBuffer()), n = Math.max(1, Math.ceil(bytes.length / FB_CHUNK));
+    for (let i = 0; i < n; i++) {
+      FB.prog = `送信中 ${Math.round(100 * i / n)}%`; setCloudUI();
+      await F.setDoc(fbDoc('blobs', id, 'c', String(i)), { i, d: F.Bytes.fromUint8Array(bytes.slice(i * FB_CHUNK, (i + 1) * FB_CHUNK)) });
+    }
+    await F.setDoc(fbDoc('blobs', id), { type: row.blob.type || '', size: bytes.length, n, done: true });
+    upMark(id);
+  }
+}
+async function fbBlobsDown(m) {
+  if (!FB.user || !S.memos.includes(m)) return;
+  const local = new Set(await db.keys('blobs')), need = blobIdsOf(m).filter(id => !local.has(id));
+  if (!need.length) return;
+  await fbTask(async () => {
+    const F = FB.F; let got = 0;
+    for (const [k, id] of need.entries()) {
+      FB.prog = `受信中 ${k + 1}/${need.length}`; setCloudUI();
+      const meta = await F.getDoc(fbDoc('blobs', id)); if (!meta.exists() || !meta.data().done) continue;
+      const md = meta.data(), snap = await F.getDocs(fbCol('blobs', id, 'c'));
+      const parts = snap.docs.map(d => d.data()).sort((a, b) => a.i - b.i); if (parts.length !== md.n) continue;
+      await db.put('blobs', { id, blob: new Blob(parts.map(p => p.d.toUint8Array()), { type: md.type }) });
+      imgCache.delete(id); upMark(id); got++;
+    }
+    if (got && S.cur && S.cur.id === m.id) { renderPanel(); redrawAll(); }
+  });
+}
+function fbDeleteBlob(id) {
+  if (!FB.user) return;
+  fbQueue(async () => {
+    const F = FB.F, snap = await F.getDocs(fbCol('blobs', id, 'c'));
+    for (const d of snap.docs) await F.deleteDoc(d.ref);
+    await F.deleteDoc(fbDoc('blobs', id)); upMark(id, false);
+  });
+}
+
+/* ---- アカウント（メールアドレスとパスワード） ---- */
+const dlgAcc = $('#dlgAccount');
+const AUTH_MSG = {
+  'auth/invalid-credential': 'メールアドレスまたはパスワードが違います',
+  'auth/wrong-password': 'メールアドレスまたはパスワードが違います',
+  'auth/user-not-found': 'このメールアドレスのアカウントがありません。「新規登録」を押してください',
+  'auth/email-already-in-use': 'このメールアドレスはすでに登録されています。「ログイン」を押してください',
+  'auth/weak-password': 'パスワードは6文字以上にしてください',
+  'auth/invalid-email': 'メールアドレスの形式が正しくありません',
+  'auth/missing-password': 'パスワードを入力してください',
+  'auth/too-many-requests': '試行回数が多すぎます。しばらく待ってからお試しください',
+  'auth/network-request-failed': 'インターネットに接続できません',
+  'auth/operation-not-allowed': 'Firebase で「メール/パスワード」のログインが有効になっていません',
+  'auth/unauthorized-domain': 'このアドレスは Firebase の「承認済みドメイン」に登録されていません'
+};
+function renderAccount() {
+  const has = !!fbConfig();
+  $('#accNoCfg').hidden = has; $('#accIn').hidden = !has || !FB.user; $('#accOut').hidden = !has || !!FB.user;
+  if (FB.user) $('#accEmail').textContent = FB.user.email || '';
+}
+$('#btnSync').addEventListener('click', () => { renderAccount(); $('#accMsg').textContent = ''; dlgAcc.showModal(); });
+async function accDo(kind) {
+  const F = FB.F, email = $('#accMail').value.trim(), pw = $('#accPw').value, msg = $('#accMsg');
+  if (!F || !FB.auth) { msg.textContent = 'Firebase に接続できていません。インターネット接続と設定値を確認してください'; return; }
+  $$('#accOut button').forEach(b => b.disabled = true); msg.textContent = '処理中…';
   try {
-    commitText(); await flushAll();
-    // 1) ドライブの状態を読む
-    const stFiles = (await gList("name = 'state.json'")).sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
-    const stFile = stFiles[0];
-    const remote = stFile ? await (await gFetch(`${DRIVE}/${stFile.id}?alt=media`)).json() : { folders: [], memos: [], tombs: { memos: {}, folders: {} } };
-    // 2) 削除記録をまとめる
-    const lt = tombs(), rt = remote.tombs || { memos: {}, folders: {} }, T = { memos: { ...(rt.memos || {}) }, folders: { ...(rt.folders || {}) } };
-    for (const k of ['memos', 'folders']) for (const [id, ts] of Object.entries(lt[k])) T[k][id] = Math.max(ts, T[k][id] || 0);
-    lsSet('tombs', JSON.stringify(T));
-    // 3) フォルダ・メモごとに新しい方を残す
-    const stamp = x => x.updatedAt || x.createdAt || 0;
-    const merge = (loc, rem, tomb) => {
-      const map = new Map(); for (const x of rem || []) map.set(x.id, x);
-      for (const x of loc) { const r = map.get(x.id); if (!r || stamp(x) >= stamp(r)) map.set(x.id, x); }
-      for (const [id, ts] of Object.entries(tomb)) { const x = map.get(id); if (x && stamp(x) <= ts) map.delete(id); }
-      return [...map.values()];
-    };
-    const localM = new Set(S.memos), localF = new Set(S.folders);
-    const remoteM = new Map((remote.memos || []).map(m => [m.id, m]));
-    let folders = merge(S.folders, remote.folders, T.folders);
-    const memos = merge(S.memos, remote.memos, T.memos).map(m => localM.has(m) ? m : normalize(m));
-    // フォルダが消えたメモは「未分類」へ
-    if (memos.some(m => !folders.some(f => f.id === m.folderId))) {
-      let un = folders.find(f => f.name === '未分類');
-      if (!un) { un = { id: uid(), name: '未分類', note: '同期時にフォルダが見つからなかったメモ', createdAt: Date.now(), updatedAt: Date.now() }; folders = [...folders, un]; }
-      for (const m of memos) if (!folders.some(f => f.id === m.folderId)) { m.folderId = un.id; m.updatedAt = Date.now(); }
-    }
-    let received = 0;
-    const sent = memos.filter(m => localM.has(m) && (!remoteM.has(m.id) || stamp(remoteM.get(m.id)) < stamp(m))).length;
-    // 4) この端末に反映
-    const keepM = new Set(memos.map(m => m.id)), keepF = new Set(folders.map(f => f.id));
-    for (const m of [...S.memos]) if (!keepM.has(m.id)) { await removeMemo(m, true); received++; }
-    for (const f of S.folders) if (!keepF.has(f.id)) { await db.del('folders', f.id); received++; }
-    for (const m of memos) if (!localM.has(m)) { await db.put('memos', m); received++; } else if (!remoteM.has(m.id) || stamp(remoteM.get(m.id)) < stamp(m)) await db.put('memos', m);
-    for (const f of folders) if (!localF.has(f)) await db.put('folders', f);
-    S.folders = folders; S.memos = memos;
-    // 5) 録音・写真：足りない方へ送る／受け取る
-    const need = new Set();
-    for (const m of memos) { for (const r of m.recordings) if (r.blob) need.add(r.blob); for (const p of m.photos) if (p.blob) need.add(p.blob); for (const s of m.strokes) if (s.t === 'img') need.add(s.blob); }
-    const remoteBlobs = new Map((await gList("appProperties has { key='kind' and value='blob' }")).map(f => [f.name.replace(/^blob-/, ''), f]));
-    const localKeys = new Set(await db.keys('blobs'));
-    const up = [...need].filter(id => localKeys.has(id) && !remoteBlobs.has(id));
-    const down = [...need].filter(id => !localKeys.has(id) && remoteBlobs.has(id));
-    let n = 0; const total = up.length + down.length;
-    for (const id of up) { setSyncUI(`送信中 ${++n}/${total}`); const r = await db.get('blobs', id); if (r) await gUpload('blob-' + id, r.blob, r.blob.type, 'blob'); }
-    // 6) 状態を保存（録音・写真を送ってから）
-    setSyncUI('保存中…');
-    const state = new Blob([JSON.stringify({ app: 'interview-notes', version: 1, updatedAt: Date.now(), folders, memos, tombs: T })], { type: 'application/json' });
-    await gUpload('state.json', state, 'application/json', 'state', stFile && stFile.id);
-    for (const id of down) {
-      setSyncUI(`受信中 ${++n}/${total}`);
-      const f = remoteBlobs.get(id), b = await (await gFetch(`${DRIVE}/${f.id}?alt=media`)).blob();
-      const type = (f.appProperties && f.appProperties.type) || b.type;
-      await db.put('blobs', { id, blob: type && type !== b.type ? new Blob([b], { type }) : b });
-    }
-    lsSet('lastSync', String(Date.now()));
-    // 7) 画面を更新
-    renderTree();
-    const cur = prevCurId && S.memos.find(m => m.id === prevCurId);
-    if (cur && cur !== prevCur) openMemo(cur.id);
-    else if (!cur) { const first = S.memos[0]; if (first) openMemo(first.id); else showWelcome(); }
-    else if (down.length) { renderPanel(); redrawAll(); }
-    setSyncUI();
-    const msg = received || sent || total ? `同期しました（受信 ${received + down.length}件・送信 ${sent + up.length}件）` : '同期しました（変更はありませんでした）';
-    if (!silent || received || down.length) toast(msg);
-  } catch (e) {
-    if (e.auth) { setSyncUI('要ログイン', true); if (!silent) gAuthRedirect(); }
-    else { setSyncUI('同期エラー', true); toast('同期できませんでした：' + e.message, 7000); }
-  } finally { G.busy = false; $('#btnSync').disabled = false; }
+    if (kind === 'login') await F.signInWithEmailAndPassword(FB.auth, email, pw);
+    else if (kind === 'signup') await F.createUserWithEmailAndPassword(FB.auth, email, pw);
+    else { if (!email) throw { code: 'auth/invalid-email' }; await F.sendPasswordResetEmail(FB.auth, email); msg.textContent = 'パスワード再設定のメールを送りました'; return; }
+    $('#accPw').value = ''; msg.textContent = ''; dlgAcc.close(); toast('ログインしました。データを同期しています');
+  } catch (e) { msg.textContent = AUTH_MSG[e && e.code] || ('ログインできませんでした：' + ((e && (e.code || e.message)) || e)); }
+  finally { $$('#accOut button').forEach(b => b.disabled = false); }
 }
-$('#btnSync').addEventListener('click', () => syncNow(false));
-$('#btnSyncNow').addEventListener('click', () => {
-  lsSet('gClientId', $('#setGClient').value.trim() || null);
-  dlgSet.close('sync'); syncNow(false);
+$('#accLogin').addEventListener('click', () => accDo('login'));
+$('#accSignup').addEventListener('click', () => accDo('signup'));
+$('#accReset').addEventListener('click', () => accDo('reset'));
+$('#accLogout').addEventListener('click', async () => {
+  fbFlushPushes(); await FB.q.catch(() => {});
+  try { await FB.F.signOut(FB.auth); } catch {}
+  dlgAcc.close(); toast('ログアウトしました（この端末のデータは残っています）');
 });
-$('#btnGLogout').addEventListener('click', () => {
-  const tok = gToken(); lsSet('gTok', null); lsSet('lastSync', null);
-  if (tok) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(tok), { method: 'POST' }).catch(() => {});
-  setSyncUI(); $('#gInfo').textContent = 'この端末の接続を解除しました（ドライブのデータは残っています）。';
-});
+$('#accOpenSettings').addEventListener('click', () => { dlgAcc.close(); $('#btnSettings').click(); });
 
 /* ---------- settings / backup ---------- */
 const dlgSet = $('#dlgSettings');
@@ -2292,10 +2487,11 @@ $('#btnSettings').addEventListener('click', async () => {
   $('#setAsrModel').value = asrModelKey();
   $('#asrInfo').textContent = (navigator.gpu ? 'この端末はGPUで高速に処理できます。' : 'この端末はGPUを使えないため、処理に時間がかかります（「標準」がおすすめ）。') + (ASR.ready ? ` 文字起こしAI（${ASR.key === 'small' ? '高精度' : '標準'}）は準備できています。` : '');
   $('#srTestOut').textContent = SR ? '' : 'このブラウザには音声認識の機能がありません。iPad は Safari、パソコンは Chrome / Edge で開いてください。';
-  $('#setGClient').value = gClientId();
-  $('#gInfo').textContent = location.protocol === 'https:'
-    ? `Google側に登録する値 ― 承認済みの JavaScript 生成元：${location.origin} ／ 承認済みのリダイレクト URI：${gRedirectUri()}` + (gToken() ? '（この端末はGoogleに接続済み）' : '')
-    : '同期は GitHub Pages など https:// のアドレスで開いたときに使えます（パソコンのファイルを直接開いた場合は使えません）。';
+  const embedded = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey);
+  $('#fbCfgBox').hidden = embedded;
+  $('#setFbCfg').value = embedded ? '' : (lsGet('fbConfig') ? JSON.stringify(JSON.parse(lsGet('fbConfig')), null, 2) : '');
+  $('#fbInfo').textContent = !fbConfig() ? 'まだ設定されていません。'
+    : `接続先：${fbConfig().projectId}${embedded ? '（index.html に設定済み）' : '（この端末に設定）'} ／ ${FB.user ? 'ログイン中：' + FB.user.email : '未ログイン'}`;
   $('#storageInfo').textContent = '';
   try { const est = await navigator.storage.estimate(); $('#storageInfo').textContent = `使用量 ${(est.usage / 1048576).toFixed(1)} MB / 利用可能 ${(est.quota / 1073741824).toFixed(1)} GB`; } catch {}
   dlgSet.returnValue = ''; dlgSet.showModal();
@@ -2305,9 +2501,16 @@ dlgSet.addEventListener('close', () => {
   lsSet('apiKey', $('#setKey').value.trim() || null); lsSet('model', $('#setModel').value);
   lsSet('recMode', $('#setRecMode').value);
   lsSet('asrModel', $('#setAsrModel').value);
-  lsSet('gClientId', $('#setGClient').value.trim() || null);
-  renderAI(); if (S.cur) srNote(); updateRecUI(); toast('設定を保存しました');
+  if (!$('#fbCfgBox').hidden) {
+    const raw = $('#setFbCfg').value.trim(), cfg = parseFbConfig(raw), before = lsGet('fbConfig');
+    if (raw && !cfg) { toast('Firebase の設定値を読み取れませんでした。表示された内容をそのまま貼り付けてください', 7000); return; }
+    lsSet('fbConfig', cfg ? JSON.stringify(cfg) : null);
+    if (cfg && !FB.app) fbInit().catch(e => { console.error(e); setCloudUI('接続できません', true); });
+    else if (lsGet('fbConfig') !== before && FB.app) toast('接続先を変えたときは、ページを再読み込みしてください', 6000);
+  }
+  renderAI(); if (S.cur) srNote(); updateRecUI(); setCloudUI(); toast('設定を保存しました');
 });
+$('#btnAccOpen').addEventListener('click', () => { dlgSet.close(); $('#btnSync').click(); });
 $('#btnAsrPreload').addEventListener('click', async () => {
   const b = $('#btnAsrPreload'), info = $('#asrInfo');
   lsSet('asrModel', $('#setAsrModel').value);
@@ -2360,19 +2563,19 @@ $('#impFile').addEventListener('change', async e => {
     for (const m of j.memos || []) await db.put('memos', m);
     S.folders = await db.all('folders'); S.memos = (await db.all('memos')).map(normalize);
     renderTree(); if (S.cur) openMemo(S.cur.id); else if (S.memos[0]) openMemo(S.memos[0].id);
+    if (FB.user) { for (const f of S.folders) fbPushFolder(f); for (const m of S.memos) fbSchedulePush(m, 500); }
     toast(`読み込みました（企業${(j.folders || []).length}件・メモ${(j.memos || []).length}件）`); dlgSet.close();
   } catch (err) { toast('読み込めませんでした：' + err.message); }
 });
 
 /* ---------- init ---------- */
 (async function init() {
-  const auth = parseAuthHash();
   try { await db.open(); }
   catch { document.body.innerHTML = '<p style="padding:24px">データの保存領域を開けませんでした。プライベートブラウズを解除するか、Chrome / Edge で開いてください。</p>'; return; }
   S.folders = await db.all('folders'); S.memos = (await db.all('memos')).map(normalize);
   for (const f of S.folders) f.updatedAt ||= f.createdAt || 0;
-  // 同期を使う端末では、サンプルを作らない（各端末のサンプルがドライブに増えないように）
-  if (!S.folders.length && !gClientId() && !auth) {
+  // クラウドを使う端末では、サンプルを作らない（各端末のサンプルがクラウドに増えないように）
+  if (!S.folders.length && !fbConfig()) {
     const f = { id: uid(), name: 'サンプル株式会社', note: '操作確認用のサンプルです。自由に編集・削除できます', createdAt: Date.now() };
     const m = newMemo(f.id, { title: '代表インタビュー（サンプル）', person: '代表取締役（サンプル）', questions: ['創業のきっかけは？', 'いちばん苦労した時期と、その乗り越え方は？', '社員に大切にしてほしい価値観は？', '今後3年で挑戦したいことは？'].map(t => ({ id: uid(), text: t, done: false })) });
     S.folders.push(f); S.memos.push(m); await db.put('folders', f); await db.put('memos', m);
@@ -2383,12 +2586,9 @@ $('#impFile').addEventListener('change', async e => {
   const last = S.memos.find(x => x.id === lsGet('lastMemo')) || S.memos[0];
   renderTree();
   if (last) openMemo(last.id); else showWelcome();
-  setSyncUI();
-  // Googleのログイン画面から戻ってきたら続けて同期／接続済みなら起動時に自動で同期
-  if (auth && auth.error) { lsSet('pendingSync', null); toast(auth.error === 'access_denied' ? 'Googleへのアクセスが許可されませんでした' : 'Googleへのログインに失敗しました：' + auth.error, 6000); setSyncUI('未接続', true); }
-  else if (auth && auth.ok) { lsSet('pendingSync', null); syncNow(false); }
-  else if (gToken() && gClientId()) syncNow(true);
-  else if (gClientId()) setSyncUI(lsGet('lastSync') ? undefined : '未接続');
+  setCloudUI();
+  // クラウド（Firebase）に接続。ログイン済みなら自動で同期が始まる
+  if (fbConfig()) fbInit().catch(e => { console.error(e); setCloudUI('接続できません', true); });
   // 前回途中だった「端末内の文字起こし」を再開
   if (nextAsrJob()) processAsrQueue();
 })();
