@@ -166,6 +166,7 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .paper-shell{min-width:0}
 .paper-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;border-radius:4px;-webkit-overflow-scrolling:touch}
 .paper.pinching{will-change:transform}
+.toq-btn{margin-left:4px}
 .zoom-btn{margin-left:4px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .brand{align-items:center}
 .side-close{margin-left:auto;font-size:20px;line-height:1}
@@ -406,6 +407,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
               <button class="icon-btn" id="btnRedo" title="やり直す (Ctrl+Y)"></button>
               <button class="icon-btn" id="btnPenOnly" title="ペンのみで書く（指はスクロール）" aria-pressed="false"></button>
               <button class="btn sm zoom-btn" id="btnZoom" hidden title="倍率を100%に戻す">100%</button>
+              <button class="btn sm toq-btn" id="btnToQ" title="上の質問リストに戻る">↑ 質問リスト</button>
             </div>
             <div class="rec-wrap">
               <div class="rec-meta" id="recMeta" hidden>
@@ -419,7 +421,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
         </div>
 
         <div class="paper-shell">
-          <div class="paper-scroll" id="paperScroll"><div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea><i class="tb-grip" id="tbGrip" hidden title="ドラッグして大きさを変える"></i><div class="tb-style" id="tbStyle" hidden role="toolbar" aria-label="文字の大きさと色"></div></div></div>
+          <div class="paper-scroll" id="paperScroll"><div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><div class="tb-editor" id="tbEditor" hidden contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="テキストボックスの入力"></div><i class="tb-grip" id="tbGrip" hidden title="ドラッグして大きさを変える"></i><div class="tb-style" id="tbStyle" hidden role="toolbar" aria-label="文字の大きさと色"></div></div></div>
           <div class="paper-foot">
             <button class="btn sm" id="btnAddPage">＋ ページを追加</button>
           </div>
@@ -973,7 +975,7 @@ function cancelTouchStroke() {
 }
 paperEl.addEventListener('touchstart', e => {
   const f = fingers(e);
-  if (f.length < 2 || Z.on || e.target.closest('textarea, .tb-style, .tb-grip')) return;
+  if (f.length < 2 || Z.on || e.target.closest('textarea, .tb-editor, .tb-style, .tb-grip')) return;
   e.preventDefault(); cancelTouchStroke();
   const [a, b] = f, r = paperEl.getBoundingClientRect(), mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
   Object.assign(Z, { on: true, d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, z0: P.zoom, z: P.zoom, mx0: mx, my0: my, mx, my, ax: (mx - r.left) / r.width, ay: (my - r.top) / r.height });
@@ -1076,23 +1078,45 @@ function drawImgItem(ctx, s) {
 const TEXT_PAD = 8, TEXT_SIZES = [22, 28, 38];
 const textFont = size => `500 ${size}px "Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif`;
 const measureCtx = document.createElement('canvas').getContext('2d');
+/* 行に分ける。各行は { s: 文字列, i0: 全体の何文字目から始まるか }（色を文字ごとに付けるため） */
 function wrapText(s) {
   measureCtx.font = textFont(s.size); const maxW = s.w - TEXT_PAD * 2, lines = [];
+  let idx = 0;
   for (const para of String(s.text).split('\n')) {
-    let line = '';
-    for (const ch of para) { if (line && measureCtx.measureText(line + ch).width > maxW) { lines.push(line); line = ch; } else line += ch; }
-    lines.push(line);
+    let line = '', i0 = idx;
+    for (const ch of para) {
+      if (line && measureCtx.measureText(line + ch).width > maxW) { lines.push({ s: line, i0 }); i0 = idx; line = ch; } else line += ch;
+      idx++;
+    }
+    lines.push({ s: line, i0 }); idx++; // 改行の1文字分
   }
   return lines;
+}
+/* 文字ごとの色（runs＝[{t:文字列, c:色}] があれば部分ごとの色、なければボックス全体で1色） */
+function charColors(s) {
+  if (!s.runs || !s.runs.length) return null;
+  const out = []; for (const r of s.runs) for (const ch of r.t) out.push(r.c || s.c);
+  return out;
 }
 /* 高さは「文字が入る高さ」と「指で広げた高さ（fh）」の大きい方 */
 function layoutTextItem(s) { s.h = Math.round(Math.max(wrapText(s).length * s.size * 1.5 + TEXT_PAD * 2, s.fh || 0)); s.b = bbox(s); return s; }
 function drawTextItem(ctx, s) {
   if (s.id && s.id === P.editingId) return;
-  const lh = s.size * 1.5;
+  const lh = s.size * 1.5, cols = charColors(s);
   ctx.save(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   ctx.font = textFont(s.size); ctx.fillStyle = s.c; ctx.textBaseline = 'middle';
-  wrapText(s).forEach((l, i) => ctx.fillText(l, s.x + TEXT_PAD, s.y + TEXT_PAD + i * lh + lh / 2));
+  wrapText(s).forEach((l, i) => {
+    const y = s.y + TEXT_PAD + i * lh + lh / 2;
+    if (!cols) { ctx.fillText(l.s, s.x + TEXT_PAD, y); return; }
+    // 同じ色の文字をまとめて、行の先頭からの幅で位置を決めて描く
+    const chars = Array.from(l.s); let a = 0;
+    while (a < chars.length) {
+      const c = cols[l.i0 + a] || s.c; let b = a + 1;
+      while (b < chars.length && (cols[l.i0 + b] || s.c) === c) b++;
+      ctx.fillStyle = c; ctx.fillText(chars.slice(a, b).join(''), s.x + TEXT_PAD + measureCtx.measureText(chars.slice(0, a).join('')).width, y);
+      a = b;
+    }
+  });
   ctx.restore();
 }
 function drawItems(ctx, list) {
@@ -1254,7 +1278,7 @@ function flingScroll(v) {
 }
 // ペンのみモードで指のときだけ標準スクロールを許可（Apple Pencil は touchType が 'stylus'）
 for (const t of ['touchstart', 'touchmove']) paperEl.addEventListener(t, e => {
-  if (e.target.closest('button, textarea')) return;
+  if (e.target.closest('button, textarea, .tb-editor')) return;
   const stylus = [...e.changedTouches].some(x => x.touchType === 'stylus');
   if (NATIVE_PAN && P.penOnly && !stylus && P.tool !== 'select' && !P.drawing && !P.erasing) return;
   e.preventDefault();
@@ -1308,6 +1332,52 @@ const tbEd = $('#tbEditor'), tbGrip = $('#tbGrip'), tbStyle = $('#tbStyle'); let
 /* 文字の大きさの段階と色（新しいボックスは、最後に選んだ大きさ・色で作る） */
 const TEXT_COLORS = [['#18212c', '黒'], ['#2346c8', '青'], ['#cf3a2f', '赤'], ['#1d7a4a', '緑'], ['#d9731a', 'オレンジ'], ['#6b7686', 'グレー']];
 P.tsize = +lsGet('textSize') || 28; P.tcolor = lsGet('textColor') || '#18212c';
+/* 入力欄の中身 ⇔ 文字と色（runs）。色を付けた部分は <span style="color"> で表示する */
+const rgbToHex = c => { const m = String(c).match(/\d+(\.\d+)?/g); return m && m.length >= 3 && /rgb/.test(c) ? '#' + m.slice(0, 3).map(v => Math.round(+v).toString(16).padStart(2, '0')).join('') : String(c).toLowerCase(); };
+function edSet(item) {
+  if (!item) { tbEd.innerHTML = ''; return; }
+  const runs = item.runs && item.runs.length ? item.runs : [{ t: item.text, c: item.c }];
+  let html = runs.map(r => { const h = esc(r.t).replace(/\n/g, '<br>'); return r.c && r.c !== item.c ? `<span style="color:${r.c}">${h}</span>` : h; }).join('');
+  if (html.endsWith('<br>')) html += '<br>'; // 最後の改行を表示するため
+  tbEd.innerHTML = html;
+}
+function edGet() {
+  const base = rgbToHex(getComputedStyle(tbEd).color), runs = [];
+  const push = (t, c) => { if (!t) return; const last = runs[runs.length - 1]; if (last && last.c === c) last.t += t; else runs.push({ t, c }); };
+  const walk = node => {
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) push(n.nodeValue.replace(/ /g, ' '), rgbToHex(getComputedStyle(n.parentElement).color));
+      else if (n.nodeName === 'BR') push('\n', runs.length ? runs[runs.length - 1].c : base);
+      else if (n.nodeType === 1) {
+        if (/^(DIV|P)$/.test(n.nodeName) && runs.length && !runs[runs.length - 1].t.endsWith('\n')) push('\n', runs[runs.length - 1].c);
+        walk(n);
+      }
+    }
+  };
+  walk(tbEd);
+  // 末尾の空白・改行は除く
+  while (runs.length) { const r = runs[runs.length - 1]; r.t = r.t.replace(/\s+$/, ''); if (r.t) break; runs.pop(); }
+  const text = runs.map(r => r.t).join('');
+  const multi = runs.some(r => r.c !== base);
+  return { text, runs: multi ? runs : null, base };
+}
+function caretToEnd() { try { const r = document.createRange(); r.selectNodeContents(tbEd); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } catch {} }
+/* 選択中の文字だけに色を付ける（選択がなければ false） */
+function colorSelection(c) {
+  const r = STY.range;
+  if (!r || r.collapsed || !tbEd.contains(r.commonAncestorContainer)) return false;
+  try { tbEd.focus({ preventScroll: true }); } catch {}
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  try { document.execCommand('styleWithCSS', false, true); } catch {}
+  document.execCommand('foreColor', false, c);
+  STY.range = s.rangeCount ? s.getRangeAt(0).cloneRange() : null;
+  return true;
+}
+document.addEventListener('selectionchange', () => {
+  // バーを押した直後は、iPad が選択を外しても覚えた選択範囲を残す
+  if (!TE || Date.now() - STY.hold < 700) return; const s = getSelection();
+  if (s.rangeCount && tbEd.contains(s.anchorNode)) STY.range = s.getRangeAt(0).cloneRange();
+});
 function openTextEditor(item, pt) {
   commitText();
   if (item) TE = { item, x: item.x, y: item.y, w: item.w, fh: item.fh || 0, size: item.size, c: item.c };
@@ -1318,8 +1388,9 @@ function openTextEditor(item, pt) {
   }
   P.editingId = item ? item.id : null;
   if (item) redrawRange(item.y - 4, item.y + item.h + 4);
-  tbEd.value = item ? item.text : ''; tbEd.hidden = false; placeEditor();
+  STY.range = null; tbEd.style.color = TE.c; edSet(item); tbEd.hidden = false; placeEditor();
   try { tbEd.focus({ preventScroll: true }); } catch { tbEd.focus(); }
+  caretToEnd();
 }
 function placeEditor() {
   if (!TE) return; const k = P.scale;
@@ -1345,11 +1416,14 @@ function placeStyleBar() {
 }
 /* noUndo：押し続けて連続で変えるときは、最初の1回だけ「元に戻す」に記録する */
 function applyTextStyle(ch, noUndo) {
+  // 入力中に文字を選んでいれば、その部分だけ色を変える
+  if (ch.c && TE && colorSelection(ch.c)) { placeEditor(); return; }
   if (ch.size) { P.tsize = ch.size; lsSet('textSize', String(ch.size)); }
   if (ch.c) { P.tcolor = ch.c; lsSet('textColor', ch.c); }
   if (TE) { Object.assign(TE, ch); placeEditor(); return; }
   const it = P.sel; if (!it || it.t !== 'text') return;
   const n = layoutTextItem({ ...it, ...ch });
+  if (ch.c) delete n.runs; // 選択ツールで色を選んだときは、ボックス全体をその色にする
   if (!noUndo) pushUndo(S.cur.strokes);
   S.cur.strokes = S.cur.strokes.map(s => s === it ? n : s); P.sel = n;
   redrawRange(Math.min(it.y, n.y) - 4, Math.max(it.y + it.h, n.y + n.h) + 4); updateSelBox(); touch();
@@ -1400,20 +1474,21 @@ const endGrip = e => { if (STY.g && e.pointerId === STY.g.id) { STY.g = null; ST
 tbGrip.addEventListener('pointerup', endGrip); tbGrip.addEventListener('pointercancel', endGrip);
 function commitText() {
   if (!TE) return;
-  const t = TE, m = S.cur, text = tbEd.value.replace(/\s+$/, '');
-  TE = null; P.editingId = null; tbEd.hidden = true; tbGrip.hidden = true; tbStyle.hidden = true; STY.g = null; tbEd.blur();
+  const t = TE, m = S.cur, { text, runs } = edGet();
+  TE = null; P.editingId = null; tbEd.hidden = true; tbGrip.hidden = true; tbStyle.hidden = true; STY.g = null; STY.range = null; tbEd.blur(); tbEd.innerHTML = '';
   if (!m) return;
   // 入力欄で広げた高さは、文字が入る高さより大きいときだけ残す
   const fh = t.fh || 0;
   if (t.item) {
     const old = t.item;
-    const changed = text !== old.text || t.size !== old.size || t.c !== old.c || t.w !== old.w || fh !== (old.fh || 0);
+    const changed = text !== old.text || t.size !== old.size || t.c !== old.c || t.w !== old.w || fh !== (old.fh || 0) || JSON.stringify(runs) !== JSON.stringify(old.runs || null);
     if (!text) { pushUndo(m.strokes); m.strokes = m.strokes.filter(s => s !== old); if (P.sel === old) P.sel = null; }
-    else if (changed) { const n = layoutTextItem({ ...old, text, size: t.size, c: t.c, w: t.w, fh }); pushUndo(m.strokes); m.strokes = m.strokes.map(s => s === old ? n : s); if (P.sel === old) P.sel = n; redrawRange(n.y - 4, n.y + n.h + 4); }
+    else if (changed) { const n = layoutTextItem({ ...old, text, size: t.size, c: t.c, w: t.w, fh }); if (runs) n.runs = runs; else delete n.runs; pushUndo(m.strokes); m.strokes = m.strokes.map(s => s === old ? n : s); if (P.sel === old) P.sel = n; redrawRange(n.y - 4, n.y + n.h + 4); }
     redrawRange(old.y - 4, old.y + old.h + 4); updateSelBox();
     if (!text || changed) touch();
   } else if (text) {
     const n = layoutTextItem({ t: 'text', id: uid(), x: t.x, y: t.y, w: t.w, fh, size: t.size, c: t.c, text });
+    if (runs) n.runs = runs;
     pushUndo(m.strokes); m.strokes = [...m.strokes, n];
     redrawRange(n.y - 4, n.y + n.h + 4);
     if (n.y + n.h > m.pages * PAGE_H - 40) addPage();
@@ -1427,8 +1502,13 @@ tbEd.addEventListener('blur', () => setTimeout(() => {
   if (Date.now() - STY.hold < 700) { try { tbEd.focus({ preventScroll: true }); } catch {} return; } // バーや丸の操作中は確定しない
   commitText();
 }, 0));
-tbEd.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitText(); } });
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (S.cur) { for (const s of S.cur.strokes) if (s.t === 'text') layoutTextItem(s); redrawAll(); } });
+tbEd.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.preventDefault(); commitText(); return; }
+  // Enter は改行（段落にせず <br> を入れる）
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br><br>'); placeEditor(); }
+});
+// 貼り付けは文字だけ（書式は持ち込まない）
+tbEd.addEventListener('paste', e => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData('text/plain'); document.execCommand('insertText', false, t); });if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (S.cur) { for (const s of S.cur.strokes) if (s.t === 'text') layoutTextItem(s); redrawAll(); } });
 
 /* 写真の挿入 */
 function visibleTopY() {
@@ -1485,6 +1565,13 @@ $$('.tool[data-tool]').forEach(b => { b.innerHTML = icon(b.dataset.tool); b.addE
 $('#btnInsertImg').innerHTML = icon('image');
 $('#btnUndo').innerHTML = icon('undo'); $('#btnRedo').innerHTML = icon('redo'); $('#btnPenOnly').innerHTML = icon('hand');
 $('#btnUndo').addEventListener('click', undo); $('#btnRedo').addEventListener('click', redo);
+/* 質問リストに戻る（閉じていれば開く） */
+$('#btnToQ').addEventListener('click', () => {
+  commitText();
+  const q = $('#qBox'); q.open = true;
+  const y = q.getBoundingClientRect().top - mainEl.getBoundingClientRect().top + mainEl.scrollTop - 12;
+  mainEl.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+});
 $('#btnPenOnly').addEventListener('click', () => { setPenOnly(!P.penOnly); toast(P.penOnly ? 'ペンのみで書きます。指はスクロールに使えます' : '指でも書けるようにしました'); });
 /* iPad Safari はタッチがペンか指かを区別できる（touchType）ので、指のスクロールをブラウザ標準に任せられる */
 const NATIVE_PAN = typeof Touch !== 'undefined' && 'touchType' in Touch.prototype;
