@@ -176,6 +176,15 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .sel-del.armed{color:#fff}
 .tb-editor{position:absolute;z-index:3;margin:0;box-sizing:border-box;border:1.5px dashed #2346c8!important;border-radius:4px!important;background:rgb(255 255 255/.7)!important;min-height:0!important;resize:none;overflow:hidden;font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;font-weight:500;line-height:1.5;user-select:text;-webkit-user-select:text;touch-action:auto;color-scheme:light}
 .paper.text{cursor:text}
+.tb-grip{position:absolute;z-index:4;width:32px;height:32px;border-radius:50%;background:#2346c8;border:4px solid #fff;box-shadow:0 1px 6px rgb(0 0 0/.35);touch-action:none;cursor:nwse-resize}
+.tb-grip::after{content:"";position:absolute;inset:-10px;border-radius:50%}
+.tb-style{position:absolute;z-index:5;display:flex;align-items:center;gap:4px;padding:5px 8px;background:#fff;border:1px solid #c7d0db;border-radius:12px;box-shadow:0 4px 16px rgb(15 25 40/.18);color-scheme:light;touch-action:none;white-space:nowrap}
+.tbs-btn{min-width:40px;height:34px;border:1px solid #d2d9e1;border-radius:8px;background:#f3f5f8;color:#18212c;font-weight:700;font-size:15px;cursor:pointer}
+.tbs-btn:active{background:#e2e8fb}
+.tbs-size{min-width:30px;text-align:center;font-family:var(--font-mono);font-size:14px;color:#18212c;font-variant-numeric:tabular-nums}
+.tbs-sep{width:1px;height:24px;background:#d2d9e1;margin:0 4px}
+.tbs-color{width:28px;height:28px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #b9c3cf;cursor:pointer;padding:0;margin:0 1px}
+.tbs-color[aria-pressed="true"]{box-shadow:0 0 0 2.5px #18212c}
 .ins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
 .ins-grid button{border:1px solid var(--line);border-radius:8px;padding:0;overflow:hidden;cursor:pointer;aspect-ratio:4/3;background:var(--surface-2)}
 .ins-grid button:hover{outline:2px solid var(--accent)}
@@ -392,7 +401,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
         </div>
 
         <div class="paper-shell">
-          <div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea></div>
+          <div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea><i class="tb-grip" id="tbGrip" hidden title="ドラッグして大きさを変える"></i><div class="tb-style" id="tbStyle" hidden role="toolbar" aria-label="文字の大きさと色"></div></div>
           <div class="paper-foot">
             <button class="btn sm" id="btnAddPage">＋ ページを追加</button>
           </div>
@@ -981,7 +990,8 @@ function wrapText(s) {
   }
   return lines;
 }
-function layoutTextItem(s) { s.h = Math.round(wrapText(s).length * s.size * 1.5 + TEXT_PAD * 2); s.b = bbox(s); return s; }
+/* 高さは「文字が入る高さ」と「指で広げた高さ（fh）」の大きい方 */
+function layoutTextItem(s) { s.h = Math.round(Math.max(wrapText(s).length * s.size * 1.5 + TEXT_PAD * 2, s.fh || 0)); s.b = bbox(s); return s; }
 function drawTextItem(ctx, s) {
   if (s.id && s.id === P.editingId) return;
   const lh = s.size * 1.5;
@@ -1049,7 +1059,7 @@ function eraseAt(pt) {
 }
 
 paperEl.addEventListener('pointerdown', e => {
-  if (!S.cur || e.target.closest('.page-del,.sel-del,.sel-edit,.tb-editor')) return;
+  if (!S.cur || e.target.closest('.page-del,.sel-del,.sel-edit,.tb-editor,.tb-grip,.tb-style')) return;
   // 入力中のテキストボックスは、紙面の別の場所に触れたら確定する（そのタップでは新しい箱を作らない）
   const wasEditing = !!TE; if (TE) commitText();
   if (e.pointerType === 'pen' && !P.penSeen) { P.penSeen = true; if (!P.penOnly) { setPenOnly(true); toast('ペンを検出しました。指で触るとスクロールになります（手のひらボタンで切替）'); } }
@@ -1152,7 +1162,7 @@ for (const t of ['touchstart', 'touchmove']) paperEl.addEventListener(t, e => {
 
 /* 写真の選択・移動・拡大縮小 */
 function startSelect(e, pt) {
-  const it = P.sel, k = 30 / P.scale; let mode;
+  const it = P.sel, k = (e.pointerType === 'touch' ? 44 : 30) / P.scale; let mode;
   if (it && Math.abs(pt[0] - (it.x + it.w)) < k && Math.abs(pt[1] - (it.y + it.h)) < k) mode = 'resize';
   else {
     const hit = boxAt(pt);
@@ -1172,7 +1182,7 @@ function dragMove(pt) {
   }
   const it = P.sel, old = it.b || bbox(it);
   if (d.mode === 'move') { it.x = Math.round(clamp(d.orig.x + dx, -it.w / 2, LW - it.w / 2)); it.y = Math.round(clamp(d.orig.y + dy, 0, m.pages * PAGE_H - it.h / 2)); }
-  else if (it.t === 'text') { it.w = Math.round(clamp(d.orig.w + dx, 120, LW)); layoutTextItem(it); }
+  else if (it.t === 'text') { it.w = Math.round(clamp(d.orig.w + dx, 120, LW)); it.fh = Math.round(Math.max(0, d.orig.h + dy)); layoutTextItem(it); }
   else { it.w = Math.round(clamp(d.orig.w + dx, 80, LW * 1.2)); it.h = Math.round(it.w * d.orig.h / d.orig.w); }
   it.b = bbox(it);
   redrawRange(Math.min(old[1], it.b[1]) - 4, Math.max(old[3], it.b[3]) + 4); updateSelBox();
@@ -1182,6 +1192,7 @@ function updateSelBox() {
   if (!it || P.tool !== 'select' || !S.cur || !S.cur.strokes.includes(it)) { box.hidden = true; return; }
   const k = P.scale; box.hidden = false; $('#selEdit').hidden = it.t !== 'text';
   Object.assign(box.style, { left: it.x * k + 'px', top: it.y * k + 'px', width: it.w * k + 'px', height: it.h * k + 'px' });
+  placeStyleBar();
 }
 const boxAt = pt => [...S.cur.strokes].reverse().find(s => isBox(s) && pt[0] >= s.x && pt[0] <= s.x + s.w && pt[1] >= s.y && pt[1] <= s.y + s.h);
 function deleteSel() {
@@ -1193,13 +1204,17 @@ $('#selDel').addEventListener('click', e => armConfirm(e.currentTarget, 'もう�
 $('#selEdit').addEventListener('click', () => { if (P.sel && P.sel.t === 'text') openTextEditor(P.sel); });
 
 /* テキストボックスの入力欄（紙面の上に重ねて表示し、確定したら紙面に描く） */
-const tbEd = $('#tbEditor'); let TE = null;
+const tbEd = $('#tbEditor'), tbGrip = $('#tbGrip'), tbStyle = $('#tbStyle'); let TE = null;
+/* 文字の大きさの段階と色（新しいボックスは、最後に選んだ大きさ・色で作る） */
+const TEXT_STEPS = [16, 20, 24, 28, 34, 40, 48, 60, 72];
+const TEXT_COLORS = [['#18212c', '黒'], ['#2346c8', '青'], ['#cf3a2f', '赤'], ['#1d7a4a', '緑'], ['#d9731a', 'オレンジ'], ['#6b7686', 'グレー']];
+P.tsize = +lsGet('textSize') || 28; P.tcolor = lsGet('textColor') || '#18212c';
 function openTextEditor(item, pt) {
   commitText();
-  if (item) TE = { item, x: item.x, y: item.y, w: item.w, size: item.size, c: item.c };
+  if (item) TE = { item, x: item.x, y: item.y, w: item.w, fh: item.fh || 0, size: item.size, c: item.c };
   else {
-    const size = TEXT_SIZES[P.wi], w = 520;
-    TE = { item: null, x: Math.round(clamp(pt[0] - TEXT_PAD, 0, LW - 160)), y: Math.round(Math.max(0, pt[1] - size * 0.75 - TEXT_PAD)), w: 0, size, c: P.ink };
+    const size = P.tsize, w = 520;
+    TE = { item: null, x: Math.round(clamp(pt[0] - TEXT_PAD, 0, LW - 160)), y: Math.round(Math.max(0, pt[1] - size * 0.75 - TEXT_PAD)), w: 0, fh: 0, size, c: P.tcolor };
     TE.w = Math.round(Math.max(160, Math.min(w, LW - TE.x - 10)));
   }
   P.editingId = item ? item.id : null;
@@ -1210,29 +1225,90 @@ function openTextEditor(item, pt) {
 function placeEditor() {
   if (!TE) return; const k = P.scale;
   Object.assign(tbEd.style, { left: TE.x * k + 'px', top: TE.y * k + 'px', width: TE.w * k + 'px', fontSize: TE.size * k + 'px', color: TE.c, padding: (TEXT_PAD * k - 1.5) + 'px' });
-  tbEd.style.height = 'auto'; tbEd.style.height = Math.max(tbEd.scrollHeight, TE.size * 1.5 * k + TEXT_PAD * 2 * k) + 'px';
+  tbEd.style.height = 'auto';
+  const hpx = Math.max(tbEd.scrollHeight, TE.size * 1.5 * k + TEXT_PAD * 2 * k, (TE.fh || 0) * k);
+  tbEd.style.height = hpx + 'px';
+  // 右下の丸（指でドラッグして大きさを変える）
+  tbGrip.hidden = false;
+  Object.assign(tbGrip.style, { left: ((TE.x + TE.w) * k - 16) + 'px', top: (TE.y * k + hpx - 16) + 'px' });
+  placeStyleBar();
 }
+/* 文字サイズ・色のバー：入力中のボックス、または選択ツールで選んだテキストボックスの上に出す */
+function styleTarget() { if (TE) return { x: TE.x, y: TE.y, w: TE.w, h: tbEd.offsetHeight / P.scale, size: TE.size, c: TE.c }; const s = P.sel; return P.tool === 'select' && s && s.t === 'text' && S.cur && S.cur.strokes.includes(s) ? s : null; }
+function placeStyleBar() {
+  const t = styleTarget(); if (!t) { tbStyle.hidden = true; return; }
+  tbStyle.hidden = false;
+  $('#tbSize').textContent = Math.round(t.size);
+  $$('#tbStyle [data-tc]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tc === t.c));
+  const k = P.scale, bw = tbStyle.offsetWidth || 330, bh = tbStyle.offsetHeight || 44, pw = paperEl.clientWidth;
+  let top = t.y * k - bh - 8; if (top < 4) top = (t.y + t.h) * k + 12;
+  tbStyle.style.left = clamp(t.x * k, 4, Math.max(4, pw - bw - 4)) + 'px'; tbStyle.style.top = top + 'px';
+}
+function applyTextStyle(ch) {
+  if (ch.size) { P.tsize = ch.size; lsSet('textSize', String(ch.size)); }
+  if (ch.c) { P.tcolor = ch.c; lsSet('textColor', ch.c); }
+  if (TE) { Object.assign(TE, ch); placeEditor(); return; }
+  const it = P.sel; if (!it || it.t !== 'text') return;
+  const n = layoutTextItem({ ...it, ...ch });
+  pushUndo(S.cur.strokes); S.cur.strokes = S.cur.strokes.map(s => s === it ? n : s); P.sel = n;
+  redrawRange(Math.min(it.y, n.y) - 4, Math.max(it.y + it.h, n.y + n.h) + 4); updateSelBox(); touch();
+}
+const STY = { hold: 0, g: null };
+tbStyle.innerHTML = `<button type="button" class="tbs-btn" data-sz="-1" aria-label="文字を小さく">A−</button><span class="tbs-size" id="tbSize">28</span><button type="button" class="tbs-btn" data-sz="1" aria-label="文字を大きく">A＋</button><span class="tbs-sep"></span>`
+  + TEXT_COLORS.map(([c, n]) => `<button type="button" class="tbs-color" data-tc="${c}" style="background:${c}" title="${n}" aria-label="文字の色 ${n}"></button>`).join('');
+// バーを押しても入力中の文字が確定されないよう、フォーカスを保つ
+tbStyle.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); STY.hold = Date.now(); });
+tbStyle.addEventListener('click', e => {
+  const t = styleTarget(); if (!t) return;
+  const sz = e.target.closest('[data-sz]'), col = e.target.closest('[data-tc]');
+  if (sz) { const i = TEXT_STEPS.findIndex(v => v >= t.size - 0.5), cur = i < 0 ? TEXT_STEPS.length - 1 : i; const next = TEXT_STEPS[clamp(cur + (+sz.dataset.sz), 0, TEXT_STEPS.length - 1)]; if (next !== t.size) applyTextStyle({ size: next }); }
+  else if (col) applyTextStyle({ c: col.dataset.tc });
+  if (TE) { STY.hold = Date.now(); try { tbEd.focus({ preventScroll: true }); } catch {} }
+});
+// 右下の丸を指（またはペン・マウス）でドラッグ → 幅と高さを自由に変える
+tbGrip.addEventListener('pointerdown', e => {
+  if (!TE) return; e.preventDefault(); e.stopPropagation(); STY.hold = Date.now();
+  try { tbGrip.setPointerCapture(e.pointerId); } catch {}
+  STY.g = { id: e.pointerId, x: e.clientX, y: e.clientY, w: TE.w, h: tbEd.offsetHeight / P.scale };
+});
+tbGrip.addEventListener('pointermove', e => {
+  const g = STY.g; if (!g || e.pointerId !== g.id || !TE) return; e.preventDefault();
+  const k = P.scale;
+  TE.w = Math.round(clamp(g.w + (e.clientX - g.x) / k, 120, LW - TE.x));
+  TE.fh = Math.round(Math.max(0, g.h + (e.clientY - g.y) / k));
+  STY.hold = Date.now(); placeEditor();
+});
+const endGrip = e => { if (STY.g && e.pointerId === STY.g.id) { STY.g = null; STY.hold = Date.now(); if (TE) try { tbEd.focus({ preventScroll: true }); } catch {} } };
+tbGrip.addEventListener('pointerup', endGrip); tbGrip.addEventListener('pointercancel', endGrip);
 function commitText() {
   if (!TE) return;
   const t = TE, m = S.cur, text = tbEd.value.replace(/\s+$/, '');
-  TE = null; P.editingId = null; tbEd.hidden = true; tbEd.blur();
+  TE = null; P.editingId = null; tbEd.hidden = true; tbGrip.hidden = true; tbStyle.hidden = true; STY.g = null; tbEd.blur();
   if (!m) return;
+  // 入力欄で広げた高さは、文字が入る高さより大きいときだけ残す
+  const fh = t.fh || 0;
   if (t.item) {
     const old = t.item;
+    const changed = text !== old.text || t.size !== old.size || t.c !== old.c || t.w !== old.w || fh !== (old.fh || 0);
     if (!text) { pushUndo(m.strokes); m.strokes = m.strokes.filter(s => s !== old); if (P.sel === old) P.sel = null; }
-    else if (text !== old.text) { const n = layoutTextItem({ ...old, text }); pushUndo(m.strokes); m.strokes = m.strokes.map(s => s === old ? n : s); if (P.sel === old) P.sel = n; redrawRange(n.y - 4, n.y + n.h + 4); }
+    else if (changed) { const n = layoutTextItem({ ...old, text, size: t.size, c: t.c, w: t.w, fh }); pushUndo(m.strokes); m.strokes = m.strokes.map(s => s === old ? n : s); if (P.sel === old) P.sel = n; redrawRange(n.y - 4, n.y + n.h + 4); }
     redrawRange(old.y - 4, old.y + old.h + 4); updateSelBox();
-    if (text !== old.text) touch();
+    if (!text || changed) touch();
   } else if (text) {
-    const n = layoutTextItem({ t: 'text', id: uid(), x: t.x, y: t.y, w: t.w, size: t.size, c: t.c, text });
+    const n = layoutTextItem({ t: 'text', id: uid(), x: t.x, y: t.y, w: t.w, fh, size: t.size, c: t.c, text });
     pushUndo(m.strokes); m.strokes = [...m.strokes, n];
     redrawRange(n.y - 4, n.y + n.h + 4);
     if (n.y + n.h > m.pages * PAGE_H - 40) addPage();
     touch();
   }
+  placeStyleBar();
 }
 tbEd.addEventListener('input', placeEditor);
-tbEd.addEventListener('blur', () => setTimeout(() => { if (TE && document.activeElement !== tbEd) commitText(); }, 0));
+tbEd.addEventListener('blur', () => setTimeout(() => {
+  if (!TE || document.activeElement === tbEd) return;
+  if (Date.now() - STY.hold < 700) { try { tbEd.focus({ preventScroll: true }); } catch {} return; } // バーや丸の操作中は確定しない
+  commitText();
+}, 0));
 tbEd.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitText(); } });
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (S.cur) { for (const s of S.cur.strokes) if (s.t === 'text') layoutTextItem(s); redrawAll(); } });
 
@@ -1304,16 +1380,17 @@ function setTool(t) {
   updateSelBox(); renderSwatches();
 }
 function renderSwatches() {
-  const list = P.tool === 'marker' ? HL : INK, cur = P.tool === 'marker' ? P.hl : P.ink;
+  const isText = P.tool === 'text';
+  const list = P.tool === 'marker' ? HL : isText ? TEXT_COLORS : INK, cur = P.tool === 'marker' ? P.hl : isText ? P.tcolor : P.ink;
   $('#swatches').innerHTML = list.map(([c, n]) => `<button class="swatch" style="background:${c}" data-c="${c}" title="${n}" aria-label="${n}" aria-pressed="${c === cur}"></button>`).join('');
-  $('#widths').innerHTML = P.tool === 'text'
-    ? ['小', '中', '大'].map((n, i) => `<button class="wbtn" data-wi="${i}" title="文字の大きさ ${n}" aria-label="文字の大きさ ${n}" aria-pressed="${i === P.wi}"><b style="font-size:${11 + i * 4}px;line-height:1">A</b></button>`).join('')
+  $('#widths').innerHTML = isText
+    ? TEXT_SIZES.map((v, i) => `<button class="wbtn" data-wi="${i}" title="文字の大きさ ${['小', '中', '大'][i]}" aria-label="文字の大きさ ${['小', '中', '大'][i]}" aria-pressed="${v === P.tsize}"><b style="font-size:${11 + i * 4}px;line-height:1">A</b></button>`).join('')
     : WIDTHS.map(([n, w], i) => `<button class="wbtn" data-wi="${i}" title="${n}" aria-label="太さ ${n}" aria-pressed="${i === P.wi}"><i style="height:${Math.max(2, w * (P.tool === 'marker' ? 1.6 : 1))}px"></i></button>`).join('');
   const dis = P.tool === 'eraser' || P.tool === 'select'; $$('#swatches button,#widths button').forEach(b => b.disabled = dis);
   $('#swatches').style.opacity = $('#widths').style.opacity = dis ? .35 : 1;
 }
-$('#swatches').addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (!b) return; if (P.tool === 'marker') P.hl = b.dataset.c; else { P.ink = b.dataset.c; if (P.tool === 'eraser') setTool('pen'); } renderSwatches(); });
-$('#widths').addEventListener('click', e => { const b = e.target.closest('[data-wi]'); if (!b) return; P.wi = +b.dataset.wi; renderSwatches(); });
+$('#swatches').addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (!b) return; if (P.tool === 'marker') P.hl = b.dataset.c; else if (P.tool === 'text') { P.tcolor = b.dataset.c; lsSet('textColor', P.tcolor); } else { P.ink = b.dataset.c; if (P.tool === 'eraser') setTool('pen'); } renderSwatches(); });
+$('#widths').addEventListener('click', e => { const b = e.target.closest('[data-wi]'); if (!b) return; if (P.tool === 'text') { P.tsize = TEXT_SIZES[+b.dataset.wi]; lsSet('textSize', String(P.tsize)); } else P.wi = +b.dataset.wi; renderSwatches(); });
 $('#btnAddPage').addEventListener('click', () => { addPage(); toast(`${S.cur.pages}ページになりました`); });
 /* ページ削除：そのページの手書きを消し、下のページを1ページ分繰り上げる（元に戻せます） */
 function renderPageBtns() {
