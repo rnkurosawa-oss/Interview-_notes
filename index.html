@@ -162,6 +162,22 @@ textarea.qtext,#qInput{resize:none;line-height:1.5;padding:6px 10px}
 .paper{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border-radius:4px;overflow:hidden;cursor:crosshair;background:#fdfdfb}
 .paper canvas{display:block}
 .paper.pen-only{touch-action:pan-y}
+.paper.pen-only.zoomed{touch-action:pan-x pan-y}
+.paper-shell{min-width:0}
+.paper-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;border-radius:4px;-webkit-overflow-scrolling:touch}
+.paper.pinching{will-change:transform}
+.zoom-btn{margin-left:4px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.brand{align-items:center}
+.side-close{margin-left:auto;font-size:20px;line-height:1}
+.tabs .panel-close{flex:none;width:40px;padding:0;margin:0 0 0 2px;font-size:22px;font-weight:400;color:var(--muted);border-bottom:2px solid transparent}
+.tabs .panel-close:hover{color:var(--fg)}
+.workspace.panel-closed{grid-template-columns:minmax(0,1fr)}
+.workspace.panel-closed .panel{display:none}
+@media (min-width:821px){
+  .app.side-closed{grid-template-columns:minmax(0,1fr)}
+  .app.side-closed .sidebar{display:none}
+  .app.side-closed .only-narrow{display:inline-grid}
+}
 .main{-webkit-overflow-scrolling:touch}
 .page-btns{position:absolute;inset:0;pointer-events:none;z-index:1}
 .page-del{position:absolute;right:10px;pointer-events:auto;min-height:28px;font-size:12px;color:#8a3a33;background:rgb(255 255 255/.85);border-color:#e3c4c0;opacity:.75}
@@ -314,7 +330,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
 <div class="app" id="app">
   <div class="scrim" id="scrim"></div>
   <aside class="sidebar" id="sidebar" aria-label="企業フォルダ">
-    <div class="brand"><h1>INTERVIEW NOTE</h1></div>
+    <div class="brand"><h1>INTERVIEW NOTE</h1><button class="icon-btn side-close" id="btnSideClose" title="メニューを閉じる" aria-label="メニューを閉じる">«</button></div>
     <div class="side-tools">
       <input type="search" id="search" placeholder="企業名・メモを検索" aria-label="検索">
       <button class="btn primary block" id="btnNewFolder">＋ 企業フォルダを追加</button>
@@ -343,9 +359,10 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
       <div class="col">
         <header class="memo-head">
           <div class="head-top">
-            <button class="icon-btn only-narrow" data-nav aria-label="メニュー">☰</button>
+            <button class="icon-btn only-narrow" data-nav aria-label="メニューを開く" title="メニューを開く">☰</button>
             <span class="crumb" id="crumb"></span>
             <span class="save-state" id="saveState">保存済み</span>
+            <button class="btn sm" id="btnPanelToggle" title="文字起こし・写真・AIコラムのパネルを開閉">パネルを閉じる</button>
             <button class="btn sm" id="btnFileSave" title="メモをWord・PDF・テキストのファイルに保存">ファイルに保存</button>
           </div>
           <input class="title-input" id="memoTitle" aria-label="メモのタイトル" placeholder="取材メモのタイトル">
@@ -388,6 +405,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
               <button class="icon-btn" id="btnUndo" title="元に戻す (Ctrl+Z)"></button>
               <button class="icon-btn" id="btnRedo" title="やり直す (Ctrl+Y)"></button>
               <button class="icon-btn" id="btnPenOnly" title="ペンのみで書く（指はスクロール）" aria-pressed="false"></button>
+              <button class="btn sm zoom-btn" id="btnZoom" hidden title="倍率を100%に戻す">100%</button>
             </div>
             <div class="rec-wrap">
               <div class="rec-meta" id="recMeta" hidden>
@@ -401,7 +419,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
         </div>
 
         <div class="paper-shell">
-          <div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea><i class="tb-grip" id="tbGrip" hidden title="ドラッグして大きさを変える"></i><div class="tb-style" id="tbStyle" hidden role="toolbar" aria-label="文字の大きさと色"></div></div>
+          <div class="paper-scroll" id="paperScroll"><div class="paper" id="paper"><div class="page-btns" id="pageBtns"></div><div class="sel-box" id="selBox" hidden><i class="sel-handle"></i><span class="sel-btns"><button class="btn sm sel-edit" id="selEdit" hidden>文字を編集</button><button class="btn sm sel-del" id="selDel">削除</button></span></div><textarea class="tb-editor" id="tbEditor" hidden spellcheck="false" aria-label="テキストボックスの入力"></textarea><i class="tb-grip" id="tbGrip" hidden title="ドラッグして大きさを変える"></i><div class="tb-style" id="tbStyle" hidden role="toolbar" aria-label="文字の大きさと色"></div></div></div>
           <div class="paper-foot">
             <button class="btn sm" id="btnAddPage">＋ ページを追加</button>
           </div>
@@ -413,6 +431,7 @@ dialog.viewer p{color:#dfe5ec;margin:0;padding:10px 16px;font-size:14px}
           <button role="tab" data-tab="tr" aria-selected="true">文字起こし</button>
           <button role="tab" data-tab="ph" aria-selected="false">写真<span class="badge" id="phBadge"></span></button>
           <button role="tab" data-tab="ai" aria-selected="false">AIコラム</button>
+          <button class="panel-close" id="btnPanelClose" title="パネルを閉じる" aria-label="パネルを閉じる">×</button>
         </div>
 
         <section class="tabpane" id="tab-tr">
@@ -802,8 +821,21 @@ $('#btnNewFolder').addEventListener('click', () => openFolderDlg(null));
 $('#btnWelcomeNew').addEventListener('click', () => openFolderDlg(null));
 
 /* mobile nav */
-$$('[data-nav]').forEach(b => b.addEventListener('click', () => $('#app').classList.add('nav-open')));
+/* 左のメニュー（企業フォルダ）：狭い画面は重ねて表示、広い画面は閉じて紙面を広く使える */
+const isNarrow = () => window.matchMedia('(max-width: 820px)').matches;
+function setSideClosed(v) { $('#app').classList.toggle('side-closed', v); lsSet('sideClosed', v ? '1' : '0'); }
+$$('[data-nav]').forEach(b => b.addEventListener('click', () => { if (isNarrow()) $('#app').classList.add('nav-open'); else setSideClosed(false); }));
 $('#scrim').addEventListener('click', () => $('#app').classList.remove('nav-open'));
+$('#btnSideClose').addEventListener('click', () => { if (isNarrow()) $('#app').classList.remove('nav-open'); else setSideClosed(true); });
+setSideClosed(lsGet('sideClosed') === '1');
+/* 右のパネル（文字起こし・写真・AIコラム） */
+function setPanelClosed(v) {
+  $('#workspace').classList.toggle('panel-closed', v); lsSet('panelClosed', v ? '1' : '0');
+  $('#btnPanelToggle').textContent = v ? 'パネルを開く' : 'パネルを閉じる';
+}
+$('#btnPanelToggle').addEventListener('click', () => setPanelClosed(!$('#workspace').classList.contains('panel-closed')));
+$('#btnPanelClose').addEventListener('click', () => setPanelClosed(true));
+setPanelClosed(lsGet('panelClosed') === '1');
 
 /* ---------- memo editor ---------- */
 function showWelcome() { S.cur = null; $('#workspace').hidden = true; $('#welcome').hidden = false; }
@@ -890,8 +922,9 @@ const PAPER = '#fdfdfb', RULE = '#cfdcea', MARGIN = '#eba3a3';
 const INK = [['#18212c', '黒'], ['#2346c8', '青'], ['#cf3a2f', '赤'], ['#1d7a4a', '緑']];
 const HL = [['#ffe36e', '黄'], ['#ffb8cc', 'ピンク'], ['#a9dbff', '水色'], ['#bdf0a6', '黄緑']];
 const WIDTHS = [['細', 2], ['中', 3.4], ['太', 6]];
-const P = { tool: 'pen', ink: INK[0][0], hl: HL[0][0], wi: 1, penOnly: lsGet('penOnly') === '1', penSeen: false, scale: 1, pages: [], drawing: null, erasing: null, pan: null, undo: [], redo: [], lastW: 0, rect: null };
-const paperEl = $('#paper'), mainEl = $('#main');
+const P = { tool: 'pen', ink: INK[0][0], hl: HL[0][0], wi: 1, penOnly: lsGet('penOnly') === '1', penSeen: false, scale: 1, pages: [], drawing: null, erasing: null, pan: null, undo: [], redo: [], lastW: 0, lastBase: 0, rect: null, zoom: 1, touches: new Set() };
+const paperEl = $('#paper'), mainEl = $('#main'), paperScroll = $('#paperScroll');
+const ZMAX = 3;
 
 function ensurePages() {
   const n = S.cur.pages;
@@ -900,13 +933,75 @@ function ensurePages() {
 }
 function layoutPaper() {
   if (!S.cur) return;
-  const w = paperEl.clientWidth; if (!w) return;
-  P.lastW = w; P.scale = w / LW; ensurePages();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5), h = PAGE_H * P.scale;
+  const base = paperScroll.clientWidth; if (!base) return;
+  const w = Math.round(base * P.zoom);
+  P.lastBase = base; P.lastW = w; P.scale = w / LW; ensurePages();
+  paperEl.style.width = w + 'px';
+  // 拡大中は画像の大きさに上限を設けて、iPad のメモリ不足を防ぐ（細かさは少し下がる）
+  const cap = P.zoom > 1.01 ? (S.cur.pages > 3 ? 1800 : 2600) : Infinity;
+  const dpr = Math.max(P.zoom > 1.01 ? 1 : 0.5, Math.min(window.devicePixelRatio || 1, 2.5, cap / w)), h = PAGE_H * P.scale;
   for (const p of P.pages) { p.c.style.width = w + 'px'; p.c.style.height = h + 'px'; p.c.width = Math.round(w * dpr); p.c.height = Math.round(h * dpr); p.dpr = dpr; }
   redrawAll(); renderPageBtns(); updateSelBox(); placeEditor();
 }
-new ResizeObserver(() => { if (S.cur && paperEl.clientWidth && paperEl.clientWidth !== P.lastW) layoutPaper(); }).observe(paperEl);
+let resizeRaf = 0;
+new ResizeObserver(() => {
+  cancelAnimationFrame(resizeRaf);
+  resizeRaf = requestAnimationFrame(() => { if (S.cur && paperScroll.clientWidth && paperScroll.clientWidth !== P.lastBase) layoutPaper(); });
+}).observe(paperScroll);
+/* 紙面の拡大・縮小（100%〜300%）。(ax, ay)＝紙面上の位置（0〜1）を、画面の (cx, cy) に保ったまま拡大する */
+function setZoom(z, ax, ay, cx, cy) {
+  z = clamp(z, 1, ZMAX); if (Math.abs(z - 1) < 0.04) z = 1;
+  P.zoom = z; layoutPaper();
+  paperEl.classList.toggle('zoomed', z > 1);
+  const zb = $('#btnZoom'); zb.hidden = z === 1; zb.textContent = Math.round(z * 100) + '%';
+  if (ax != null) {
+    const r = paperEl.getBoundingClientRect();
+    paperScroll.scrollLeft += (r.left + ax * r.width) - cx;
+    mainEl.scrollTop += (r.top + ay * r.height) - cy;
+  }
+}
+$('#btnZoom').addEventListener('click', () => { const r = paperEl.getBoundingClientRect(), y = Math.max(r.top, 0) + 200; setZoom(1, 0, (y - r.top) / r.height, r.left, y); });
+/* 2本指のピンチ（指2本でつまんで広げる・縮める） */
+const Z = { on: false };
+const fingers = e => [...e.touches].filter(t => t.touchType !== 'stylus');
+function cancelTouchStroke() {
+  const d = P.drawing;
+  if (d && d.type === 'touch') { P.drawing = null; P.rect = null; const b = bbox(d.s); redrawRange(b[1] - 20, b[3] + 20); }
+  if (P.erasing && P.erasing.type === 'touch') { S.cur.strokes = P.erasing.before; P.erasing = null; redrawAll(); }
+  if (P.drag && P.drag.type === 'touch') { P.drag = null; }
+  P.pan = null; P.tap = null;
+}
+paperEl.addEventListener('touchstart', e => {
+  const f = fingers(e);
+  if (f.length < 2 || Z.on || e.target.closest('textarea, .tb-style, .tb-grip')) return;
+  e.preventDefault(); cancelTouchStroke();
+  const [a, b] = f, r = paperEl.getBoundingClientRect(), mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
+  Object.assign(Z, { on: true, d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, z0: P.zoom, z: P.zoom, mx0: mx, my0: my, mx, my, ax: (mx - r.left) / r.width, ay: (my - r.top) / r.height });
+  paperEl.style.transformOrigin = `${Z.ax * 100}% ${Z.ay * 100}%`; paperEl.classList.add('pinching');
+}, { passive: false });
+paperEl.addEventListener('touchmove', e => {
+  if (!Z.on) return; const f = fingers(e); if (f.length < 2) return;
+  e.preventDefault();
+  const [a, b] = f, d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  Z.mx = (a.clientX + b.clientX) / 2; Z.my = (a.clientY + b.clientY) / 2; Z.z = clamp(Z.z0 * d / Z.d0, 1, ZMAX);
+  paperEl.style.transform = `translate(${Z.mx - Z.mx0}px, ${Z.my - Z.my0}px) scale(${Z.z / Z.z0})`;
+}, { passive: false });
+const endPinch = e => {
+  if (!Z.on || fingers(e).length >= 2) return;
+  Z.on = false; paperEl.style.transform = ''; paperEl.classList.remove('pinching');
+  setZoom(Z.z, Z.ax, Z.ay, Z.mx, Z.my);
+};
+paperEl.addEventListener('touchend', endPinch); paperEl.addEventListener('touchcancel', endPinch);
+for (const t of ['touchend', 'touchcancel']) document.addEventListener(t, e => { if (!e.touches.length) P.touches.clear(); });
+paperEl.addEventListener('gesturestart', e => e.preventDefault()); // iPad Safari の画面全体の拡大を止める
+/* パソコン：トラックパッドのピンチ（Ctrl＋ホイール）でも拡大・縮小 */
+let wheelZ = null;
+paperEl.addEventListener('wheel', e => {
+  if (!e.ctrlKey) return; e.preventDefault();
+  const r = paperEl.getBoundingClientRect();
+  wheelZ = { z: (wheelZ ? wheelZ.z : P.zoom) * Math.exp(-e.deltaY * 0.01), ax: (e.clientX - r.left) / r.width, ay: (e.clientY - r.top) / r.height, cx: e.clientX, cy: e.clientY, pending: wheelZ && wheelZ.pending };
+  if (!wheelZ.pending) { wheelZ.pending = true; requestAnimationFrame(() => { const w = wheelZ; wheelZ = null; setZoom(w.z, w.ax, w.ay, w.cx, w.cy); }); }
+}, { passive: false });
 
 function pageCtx(i) { const p = P.pages[i], k = p.dpr * P.scale; p.ctx.setTransform(k, 0, 0, k, 0, -i * PAGE_H * k); return p.ctx; }
 function drawBg(ctx, i, total, plain) {
@@ -1060,13 +1155,15 @@ function eraseAt(pt) {
 
 paperEl.addEventListener('pointerdown', e => {
   if (!S.cur || e.target.closest('.page-del,.sel-del,.sel-edit,.tb-editor,.tb-grip,.tb-style')) return;
+  // 指が2本になったら、書きかけの線をやめてピンチ（拡大・縮小）として扱う
+  if (e.pointerType === 'touch') { P.touches.add(e.pointerId); if (P.touches.size >= 2 || Z.on) { cancelTouchStroke(); return; } }
   // 入力中のテキストボックスは、紙面の別の場所に触れたら確定する（そのタップでは新しい箱を作らない）
   const wasEditing = !!TE; if (TE) commitText();
   if (e.pointerType === 'pen' && !P.penSeen) { P.penSeen = true; if (!P.penOnly) { setPenOnly(true); toast('ペンを検出しました。指で触るとスクロールになります（手のひらボタンで切替）'); } }
   // ペンのみモードの指：iPad はブラウザ標準のスクロール（慣性つき）、その他は手動スクロール
   if (e.pointerType === 'touch' && P.penOnly && P.tool !== 'select') {
     if (P.tool === 'text') P.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, skip: wasEditing };
-    if (!NATIVE_PAN) { P.pan = { id: e.pointerId, y: e.clientY, v: 0, t: e.timeStamp }; paperEl.setPointerCapture(e.pointerId); }
+    if (!NATIVE_PAN) { P.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, v: 0, t: e.timeStamp }; paperEl.setPointerCapture(e.pointerId); }
     return;
   }
   if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -1089,9 +1186,11 @@ paperEl.addEventListener('pointerdown', e => {
   live(s, 0, ctx => dot(ctx, s));
 });
 paperEl.addEventListener('pointermove', e => {
+  if (Z.on && e.pointerType === 'touch') return;
   if (P.pan && e.pointerId === P.pan.id) {
-    const dy = e.clientY - P.pan.y, dt = Math.max(1, e.timeStamp - P.pan.t);
-    mainEl.scrollTop -= dy; P.pan.v = 0.8 * (-dy / dt) + 0.2 * P.pan.v; P.pan.y = e.clientY; P.pan.t = e.timeStamp; return;
+    const dy = e.clientY - P.pan.y, dx = e.clientX - P.pan.x, dt = Math.max(1, e.timeStamp - P.pan.t);
+    mainEl.scrollTop -= dy; paperScroll.scrollLeft -= dx;
+    P.pan.v = 0.8 * (-dy / dt) + 0.2 * P.pan.v; P.pan.y = e.clientY; P.pan.x = e.clientX; P.pan.t = e.timeStamp; return;
   }
   if (!P.drawing && !P.erasing && !P.drag) return;
   P.rect = paperEl.getBoundingClientRect(); // スクロールが動いていても位置がずれないよう毎回測る
@@ -1111,6 +1210,7 @@ paperEl.addEventListener('pointermove', e => {
   }
 });
 function endPointer(e) {
+  if (e.type === 'pointerup' || e.type === 'pointercancel') P.touches.delete(e.pointerId);
   if (P.tap && e.pointerId === P.tap.id) {
     // テキストツール：軽くタップして離したら、その位置に入力欄を開く（既存の箱なら編集）
     const t = P.tap; P.tap = null;
@@ -1206,7 +1306,6 @@ $('#selEdit').addEventListener('click', () => { if (P.sel && P.sel.t === 'text')
 /* テキストボックスの入力欄（紙面の上に重ねて表示し、確定したら紙面に描く） */
 const tbEd = $('#tbEditor'), tbGrip = $('#tbGrip'), tbStyle = $('#tbStyle'); let TE = null;
 /* 文字の大きさの段階と色（新しいボックスは、最後に選んだ大きさ・色で作る） */
-const TEXT_STEPS = [16, 20, 24, 28, 34, 40, 48, 60, 72];
 const TEXT_COLORS = [['#18212c', '黒'], ['#2346c8', '青'], ['#cf3a2f', '赤'], ['#1d7a4a', '緑'], ['#d9731a', 'オレンジ'], ['#6b7686', 'グレー']];
 P.tsize = +lsGet('textSize') || 28; P.tcolor = lsGet('textColor') || '#18212c';
 function openTextEditor(item, pt) {
@@ -1244,24 +1343,43 @@ function placeStyleBar() {
   let top = t.y * k - bh - 8; if (top < 4) top = (t.y + t.h) * k + 12;
   tbStyle.style.left = clamp(t.x * k, 4, Math.max(4, pw - bw - 4)) + 'px'; tbStyle.style.top = top + 'px';
 }
-function applyTextStyle(ch) {
+/* noUndo：押し続けて連続で変えるときは、最初の1回だけ「元に戻す」に記録する */
+function applyTextStyle(ch, noUndo) {
   if (ch.size) { P.tsize = ch.size; lsSet('textSize', String(ch.size)); }
   if (ch.c) { P.tcolor = ch.c; lsSet('textColor', ch.c); }
   if (TE) { Object.assign(TE, ch); placeEditor(); return; }
   const it = P.sel; if (!it || it.t !== 'text') return;
   const n = layoutTextItem({ ...it, ...ch });
-  pushUndo(S.cur.strokes); S.cur.strokes = S.cur.strokes.map(s => s === it ? n : s); P.sel = n;
+  if (!noUndo) pushUndo(S.cur.strokes);
+  S.cur.strokes = S.cur.strokes.map(s => s === it ? n : s); P.sel = n;
   redrawRange(Math.min(it.y, n.y) - 4, Math.max(it.y + it.h, n.y + n.h) + 4); updateSelBox(); touch();
 }
-const STY = { hold: 0, g: null };
-tbStyle.innerHTML = `<button type="button" class="tbs-btn" data-sz="-1" aria-label="文字を小さく">A−</button><span class="tbs-size" id="tbSize">28</span><button type="button" class="tbs-btn" data-sz="1" aria-label="文字を大きく">A＋</button><span class="tbs-sep"></span>`
+const TEXT_MIN = 8, TEXT_MAX = 120;
+const STY = { hold: 0, g: null, rep: null };
+tbStyle.innerHTML = `<button type="button" class="tbs-btn" data-sz="-1" aria-label="文字を1小さく" title="1小さく（押し続けると連続）">A−</button><span class="tbs-size" id="tbSize">28</span><button type="button" class="tbs-btn" data-sz="1" aria-label="文字を1大きく" title="1大きく（押し続けると連続）">A＋</button><span class="tbs-sep"></span>`
   + TEXT_COLORS.map(([c, n]) => `<button type="button" class="tbs-color" data-tc="${c}" style="background:${c}" title="${n}" aria-label="文字の色 ${n}"></button>`).join('');
+/* 文字サイズは1ずつ。押し続けると少しずつ速く連続で変わる */
+function stepSize(dir, first) {
+  const t = styleTarget(); if (!t) return;
+  const next = clamp(Math.round(t.size) + dir, TEXT_MIN, TEXT_MAX);
+  if (next !== Math.round(t.size)) applyTextStyle({ size: next }, !first);
+  STY.hold = Date.now();
+}
+function stopRepeat() { if (STY.rep) { clearTimeout(STY.rep.t); clearInterval(STY.rep.i); STY.rep = null; } }
 // バーを押しても入力中の文字が確定されないよう、フォーカスを保つ
-tbStyle.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); STY.hold = Date.now(); });
+tbStyle.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation(); STY.hold = Date.now();
+  const sz = e.target.closest('[data-sz]'); if (!sz) return;
+  STY.ptrAt = Date.now();
+  const dir = +sz.dataset.sz; stopRepeat(); stepSize(dir, true);
+  const rep = STY.rep = { t: setTimeout(() => { rep.i = setInterval(() => stepSize(dir, false), 70); }, 420), i: null };
+});
+for (const t of ['pointerup', 'pointercancel', 'pointerleave']) tbStyle.addEventListener(t, stopRepeat);
+document.addEventListener('pointerup', stopRepeat);
 tbStyle.addEventListener('click', e => {
   const t = styleTarget(); if (!t) return;
   const sz = e.target.closest('[data-sz]'), col = e.target.closest('[data-tc]');
-  if (sz) { const i = TEXT_STEPS.findIndex(v => v >= t.size - 0.5), cur = i < 0 ? TEXT_STEPS.length - 1 : i; const next = TEXT_STEPS[clamp(cur + (+sz.dataset.sz), 0, TEXT_STEPS.length - 1)]; if (next !== t.size) applyTextStyle({ size: next }); }
+  if (sz) { if (Date.now() - (STY.ptrAt || 0) > 800) stepSize(+sz.dataset.sz, true); } // キーボード操作のときだけここで変える（指・マウスは押した瞬間に変えている）
   else if (col) applyTextStyle({ c: col.dataset.tc });
   if (TE) { STY.hold = Date.now(); try { tbEd.focus({ preventScroll: true }); } catch {} }
 });
